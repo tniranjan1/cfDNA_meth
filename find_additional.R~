@@ -1,0 +1,34 @@
+main_path = '/home/tejasvi/epiclock/450/methylvals'
+files = list.files(path=main_path, pattern='.txt', full.names=T, recursive=T)
+setwd("/home/tejasvi/cfDNA-MS/other_reference")
+output_dir <- "/home/tejasvi/cfDNA-MS/other_reference"
+
+
+to_remove = 'lung|muscle|skin|saliva|umbilical|cervix|whole|buccal|prostate|bone|adipose|spleen|cartilage|liver|kidney|diaph|villus|breast|mucosa|fibroblast|thyroid|adrenal|aorta|blood|colon|esoph|heart|lymph|epithel|pancreas|cardi|stomach|CD4'
+files = grep(to_remove, files, invert=T, perl=T, ignore.case=T, value=T)
+phenotype <- rep('leukocyte', times=length(files))
+phenotype[grep('leukocyte', files, invert=T, ignore.case=T)] <- 'Control-NCx'
+phenotype[grep('cerebellum', files, ignore.case=T)] <- 'Control-Cerebellum'
+
+phenotype <- cbind(phenotype, 'Ctrl')
+colnames(phenotype) <- c('Pheno1', 'Pheno2')
+
+sample_names <- as.vector(sapply(files, function(f) { strsplit(f, '/')[[1]][8] }))
+rownames(phenotype) <- sample_names
+
+beta_vals <- data.frame()
+i = 0
+for(f in files)
+{
+  i <- i + 1
+  df <- scan(f, what=character(), sep="\n")
+  header <- strsplit(df[1], "\t")[[1]]
+  vals <- strsplit(df[2], "\t")[[1]]
+  header <- header[3:length(header)]
+  vals <- vals[3:length(vals)]
+  beta_vals[sample_names[i],header] <- vals
+  cat(i)
+}
+
+phenotype <- phenotype[!is.na(beta_vals[,1]),]
+beta_vals <- beta_vals[!is.na(beta_vals[,1]),]
