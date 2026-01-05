@@ -10,9 +10,9 @@ import gzip
 import tensorflow as tf
 from tensorflow import keras
 import keras.backend as K
-from tensorflow.keras import layers
-from tensorflow.keras.layers.experimental import preprocessing
-from tensorflow.keras.models import Sequential
+from keras import layers
+from keras.layers.experimental import preprocessing
+from keras.models import Sequential
 from sklearn import feature_selection as fs
 from CLR.clr_callback import CyclicLR
 import random
