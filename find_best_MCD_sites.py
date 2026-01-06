@@ -7,12 +7,13 @@ import gc
 import sys
 import pickle
 import gzip
+os.environ['TF_XLA_FLAGS'] = "--tf_xla_auto_jit=2 --tf_xla_cpu_global_jit"
 import tensorflow as tf
 from tensorflow import keras
-import keras.backend as K
-from keras import layers
-from keras.layers.experimental import preprocessing
-from keras.models import Sequential
+import tensorflow.keras.backend as K
+from tensorflow.keras import layers
+from tensorflow.keras.layers.experimental import preprocessing
+from tensorflow.keras.models import Sequential
 from sklearn import feature_selection as fs
 from CLR.clr_callback import CyclicLR
 import random
@@ -20,11 +21,14 @@ import gc
 import warnings
 from p_tqdm import p_map
 import matplotlib.pyplot as plt
+from multiprocessing import Pool
+from tqdm import tqdm
 
 # limit cores
-tf_cores = 24
+tf_cores = 48
 
-tf.compat.v1.disable_v2_behavior()
+#tf.compat.v1.disable_v2_behavior()
+tf.function(jit_compile=True)
 tf.config.optimizer.set_jit(True)
 #tf.config.threading.set_inter_op_parallelism_threads(tf_cores)
 #tf.config.threading.set_intra_op_parallelism_threads(tf_cores)
@@ -37,12 +41,12 @@ pd.options.mode.chained_assignment = None
 # ignore PerformanceWarning for short dataframes
 warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
 
-
 # get methylation data
 work_dir = '/results/ep/study/hg38s/study250-cfDNA_prelim/cfDNA-MS'
 beta_file = work_dir + "/MCD_reference/beta_values.txt"
 ms_beta_file = work_dir + "/MS_reference/MS_beta_values.txt"
 other_beta_file = work_dir + "/other_reference/other_beta_values.txt"
+blood_beta_file = work_dir + "/other_reference/blood_beta_values.txt"
 beta_values = pd.read_table(beta_file, index_col=0)
 beta_values = beta_values.transpose()
 beta_values = (beta_values * 100).round() / 100
@@ -53,16 +57,23 @@ ms_beta_values = (ms_beta_values * 100).round() / 100
 ms_beta_values = ms_beta_values.astype(np.float16)
 other_beta_values = pd.read_table(other_beta_file, index_col=0)
 other_beta_values = other_beta_values.transpose()
+other_beta_values = (other_beta_values * 100).round() / 100
 other_beta_values = other_beta_values.astype(np.float16)
+blood_beta_values = pd.read_table(blood_beta_file, index_col=0)
+blood_beta_values = (blood_beta_values * 100).round() / 100
+blood_beta_values = blood_beta_values.astype(np.float16)
+blood_beta_values = blood_beta_values.transpose()
 
 beta_values = beta_values.iloc[:,(~beta_values.columns.duplicated())]
 ms_beta_values = ms_beta_values.iloc[:,(~ms_beta_values.columns.duplicated())]
 other_beta_values = other_beta_values.iloc[:,(~other_beta_values.columns.duplicated())]
-intersecting_columns = beta_values.columns.intersection(ms_beta_values.columns).intersection(other_beta_values.columns)
+blood_beta_values = blood_beta_values.iloc[:,(~blood_beta_values.columns.duplicated())]
+intersecting_columns = beta_values.columns.intersection(ms_beta_values.columns).intersection(other_beta_values.columns).intersection(blood_beta_values.columns)
 beta_values = beta_values[intersecting_columns]
 ms_beta_values = ms_beta_values[intersecting_columns]
 other_beta_values = other_beta_values[intersecting_columns]
-beta_norm = pd.concat([beta_values, ms_beta_values, other_beta_values], axis=0)
+blood_beta_values = blood_beta_values[intersecting_columns]
+beta_norm = pd.concat([beta_values, ms_beta_values, other_beta_values, blood_beta_values], axis=0)
 beta_min = beta_norm.min(axis=0)
 beta_max = beta_norm.max(axis=0)
 beta_norm = (beta_norm - beta_min) / (beta_max - beta_min)
@@ -80,11 +91,14 @@ MS_pheno_data.columns = [ 'Pheno1', 'Pheno2' ]
 other_pheno_file = work_dir + "/other_reference/other_pheno_label.txt"
 other_pheno_data = pd.read_table(other_pheno_file, index_col=0)
 
-combined_pheno_data = pd.concat([ pheno_data, MS_pheno_data, other_pheno_data ])
-combined_pheno_data['Pheno3'][MS_pheno_data.index.append(other_pheno_data.index)] = 'non-TLE'
-combined_pheno_data['Pheno4'][MS_pheno_data.index.append(other_pheno_data.index)] = 'non-FCD'
-combined_pheno_data['Pheno5'][MS_pheno_data.index.append(other_pheno_data.index)] = 'non-FCD'
-combined_pheno_data['Pheno6'][MS_pheno_data.index.append(other_pheno_data.index)] = 'non-MCD'
+blood_pheno_file = work_dir + "/other_reference/blood_pheno_label.txt"
+blood_pheno_data = pd.read_table(blood_pheno_file, index_col=0)
+
+combined_pheno_data = pd.concat([ pheno_data, MS_pheno_data, other_pheno_data, blood_pheno_data ])
+combined_pheno_data['Pheno3'][MS_pheno_data.index.append(other_pheno_data.index).append(blood_pheno_data.index)] = 'non-TLE'
+combined_pheno_data['Pheno4'][MS_pheno_data.index.append(other_pheno_data.index).append(blood_pheno_data.index)] = 'non-FCD'
+combined_pheno_data['Pheno5'][MS_pheno_data.index.append(other_pheno_data.index).append(blood_pheno_data.index)] = 'non-FCD'
+combined_pheno_data['Pheno6'][MS_pheno_data.index.append(other_pheno_data.index).append(blood_pheno_data.index)] = 'non-MCD'
 combined_pheno_data['Pheno7'] = 'non-MS'
 combined_pheno_data['Pheno7'][np.vstack([ combined_pheno_data['Pheno1'] == x for x in [ 'Demy_MS_Hipp', 'My_MS_Hipp', 'MS' ] ]).sum(axis=0) > 0] = 'isMS'
 combined_pheno_data['Pheno8'] =	'MS_normal'
@@ -101,7 +115,7 @@ def fstat(c):
   f_stat = fs.SelectFdr(fs.f_classif, alpha = alpha_cut).fit(beta_norm, combined_pheno_labels[c])
   return f_stat.get_support()
 
-hold = p_map(fstat, combined_pheno_labels.columns.tolist(), num_cpus=tf_cores)
+hold = p_map(fstat, combined_pheno_labels.columns.tolist(), num_cpus=6)
 comb_keep = (np.vstack(hold).sum(axis=0) > 0) + 0
 keep = comb_keep
 
@@ -168,6 +182,7 @@ combined_pheno_labels = combined_pheno_labels.loc[samples,:]
 max_allowed = pd.Series([ train_size[t] for t in these_labels[0] ], index=these_labels[0])
 max_valid = combined_pheno_labels[these_labels[0]].sum() - max_allowed
 max_valid[max_valid > 40] = 40
+
 def group_size(sampleset, max_allowed):
   where_too_large = label_df[these_labels[0]].loc[sampleset].sum() > max_allowed
   while any(label_df[these_labels[0]].loc[sampleset].sum() > max_allowed):
@@ -176,6 +191,88 @@ def group_size(sampleset, max_allowed):
     where_too_large = label_df[these_labels[0]].loc[sampleset].sum() > max_allowed
   return sampleset
 
+def data_generator(data_vec, batch_size=4):
+  """
+  Generator that yields batches of data with leukocyte spike-in augmentation.
+  
+  For each sample, randomly selects a spike-in fraction (0.5, 0.25, 0.12  5),
+  finds a leukocyte sample, mixes it with the current sample, and converts to binary.
+
+  Args:
+    data_vec(np.ndarray): vector of methylation data to be spike into leukocyte data
+  """
+  leukocyte_indices = combined_pheno_labels.index[combined_pheno_labels['leukocyte'] > 0].tolist()
+  batch_x = []
+  for _ in range(batch_size):
+    # spike-in fraction
+    for s in [0.5, 0.25, 0.125]:
+      # Random leukocyte sample
+      i = np.random.choice(leukocyte_indices)
+      # Get data vectors
+      row_r = data_vec
+      row_l = np.array(beta_norm.loc[i,keep > 0])
+      # Mix: d = (1-s)*row_l + s*row_r
+      d = ((1 - s) * row_l) + (s * row_r)
+      # Convert to binary: each element has probability p of being 1
+      d_binary = (np.random.rand(len(d)) < d).astype(np.float32)
+      batch_x.append(d_binary)
+  return np.array(batch_x)
+
+def build_meth_model(n_cpgs, n_classes, proj_dim=512, l1_proj=1e-6, l2_proj=1e-5,
+                     l2_hidden=1e-4, noise_std=0.01, out_activation="softmax"):
+    """
+    Neural network for cfDNA single-read methylation classification.
+    Parameters
+    ----------
+    n_cpgs : int
+        Number of CpG sites (input dimensionality).
+    n_classes : int
+        Number of disease / healthy labels.
+    proj_dim : int
+        Dimensionality of learned projection layer.
+    l1_proj : float
+        L1 regularization strength for projection layer.
+    l2_proj : float
+        L2 regularization strength for projection layer.
+    l2_hidden : float
+        L2 regularization strength for hidden layers.
+    noise_std : float
+        Standard deviation of Gaussian noise injected at input.
+    out_activation : str
+        Activation function for the output layer.
+
+    Returns
+    -------
+    tf.keras.Model
+    """
+    inputs = layers.Input(shape=(n_cpgs,), name="methylation_input")
+    # ---- Input noise and dropout(models cfDNA sampling noise) ----
+    x = layers.GaussianNoise(stddev=noise_std, name="input_noise")(inputs)
+#    x = layers.Dropout(0.1, name="input_dropout")(x)
+    # ---- Sparse linear projection ----
+    x = layers.Dense(proj_dim, activation="linear",
+        kernel_regularizer=keras.regularizers.l1_l2(l1=l1_proj, l2=l2_proj),
+        name="projection_dense")(x)
+    x = layers.BatchNormalization(name="projection_batchnorm")(x)
+    x = layers.Activation("relu", name="projection_relu")(x)
+    x = layers.Dropout(0.5, name="projection_dropout")(x)
+    # ---- Hidden layer 1 ----
+    x = layers.Dense(proj_dim // 2, activation="relu",
+        kernel_regularizer=keras.regularizers.l2(l2_hidden),
+        name="hidden_dense_1")(x)
+    x = layers.BatchNormalization(name="hidden_batchnorm_1")(x)
+    x = layers.Dropout(0.4, name="hidden_dropout_1")(x)
+    # ---- Hidden layer 2 ----
+    x = layers.Dense(proj_dim // 8, activation="relu",
+        kernel_regularizer=keras.regularizers.l2(l2_hidden),
+        name="hidden_dense_2")(x)
+    x = layers.Dropout(0.3, name="hidden_dropout_2")(x)
+    # ---- Output ----
+    outputs = layers.Dense(n_classes, activation=out_activation,
+        name="output")(x)
+    model = tf.keras.models.Model(inputs=inputs, outputs=outputs, name="meth_classifier")
+    return model
+
 # build model function
 def build_and_train_model(label, df, label_df, keep):
   print(label)
@@ -183,25 +280,29 @@ def build_and_train_model(label, df, label_df, keep):
   if len(label) == 1:
     loss = tf.keras.losses.BinaryCrossentropy(from_logits=False)
     activation = 'sigmoid'
+    ml = False
   else:
-    loss = 'categorical_crossentropy'
+    loss = tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.05)
     activation = 'softmax'
-  metrics = [ tf.keras.metrics.AUC(),
-              tf.keras.metrics.AUC(curve="PR"),
+    ml = True
+  metrics = [ tf.keras.metrics.AUC(multi_label=ml, num_labels=len(label)),
+              tf.keras.metrics.AUC(multi_label=ml, num_labels=len(label), curve="PR"),
               tf.keras.metrics.Precision(),
               tf.keras.metrics.Recall() ]
-  regular = keras.regularizers.l1_l2(l1=0.02, l2=0.02)
+  regular = keras.regularizers.l1_l2(l1=2e-4, l2=2e-4)
   input_size = (keep > 0).sum()
   label_size = len(label)
-  model = Sequential([
-      layers.Dropout(.9, input_shape=(input_size,)),
-      layers.Dense(100, kernel_regularizer=regular, bias_regularizer=regular),
-      layers.GaussianNoise(0.4),
-      layers.Dropout(.9),
-      layers.Dense(label_size, activation=activation)
-  ])
+#  model = Sequential([
+#      layers.Dropout(.9, input_shape=(input_size,)),
+#      layers.Dense(200, kernel_regularizer=regular, bias_regularizer=regular),
+#      layers.Dropout(.9),
+#      layers.Dense(100, kernel_regularizer=regular, bias_regularizer=regular),
+#      layers.GaussianNoise(0.4),
+#      layers.Dense(label_size, activation=activation)
+#  ])
+  model = build_meth_model(n_cpgs=input_size, n_classes=label_size, out_activation=activation)
   ## train model
-  BATCH_SIZE = 64
+  BATCH_SIZE = 48
   epochs = 10000
   main_label = label_df[label]
   train_index = [ item for s in [ group_size(label_df.index[label_df[t] > 0], max_allowed) for t in label ] for item in s ]
@@ -215,31 +316,63 @@ def build_and_train_model(label, df, label_df, keep):
   valid_index = group_size(valid_index, max_valid)
   valid_x = np.array(df.loc[valid_index,keep > 0])
   valid_y = np.array(label_df[label].loc[valid_index])
-  sample_weight = main_label.loc[train_index]
-  class_weight = np.unique(np.array(sample_weight), return_counts=True, axis=0)
-  class_weight = [ class_weight[0], ( 1 / ( class_weight[1] / class_weight[1].sum() ) ) ]
-  sample_weight = np.array([ class_weight[1][abs(class_weight[0] - np.array(sample_weight)[s,:]).sum(axis=1) == 0][0] for s in range(len(sample_weight)) ])
-  steps_per_epoch = len(train_index) // BATCH_SIZE
-  reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=.5, patience=4, min_lr=1e-7)
+  train_x = np.array(df.loc[train_index,keep > 0])
+  train_y = np.array(main_label.loc[train_index])
+  sample_weight_train = main_label.loc[train_index]
+  class_weight_train = np.unique(np.array(sample_weight_train), return_counts=True, axis=0)
+  class_weight_train = [ class_weight_train[0], ( 1 / ( class_weight_train[1] / class_weight_train[1].sum() ) ) ]
+  sample_weight_train = np.array([ class_weight_train[1][abs(class_weight_train[0] - np.array(sample_weight_train)[s,:]).sum(axis=1) == 0][0] for s in range(len(sample_weight_train)) ])
+  sample_weight_valid = np.array(main_label.loc[valid_index])
+  class_weight_valid = np.unique(np.array(sample_weight_valid), return_counts=True, axis=0)
+  class_weight_valid = [ class_weight_valid[0], ( 1 / ( class_weight_valid[1] / class_weight_valid[1].sum() ) ) ]
+  sample_weight_valid = np.array([ class_weight_valid[1][abs(class_weight_valid[0] - np.array(sample_weight_valid)[s,:]).sum(axis=1) == 0][0] for s in range(len(sample_weight_valid)) ])
+  with Pool(processes=24) as pool:
+    items = [ train_x[s,:] for s in range(len(train_x))]
+    expanded_train_x = np.vstack(pool.map(data_generator, tqdm(items, total=len(train_x))))
+    expanded_train_y = np.vstack([ np.tile(train_y[s,:], (12,1)) for s in range(len(train_y)) ])
+    expanded_train_weight = np.hstack([ np.tile(sample_weight_train[s], 12) for s in range(len(sample_weight_train)) ])
+    items = [ valid_x[s,:] for s in range(len(valid_x))]
+    expanded_valid_x = np.vstack(pool.map(data_generator, tqdm(items, total=len(valid_x))))
+    expanded_valid_y = np.vstack([ np.tile(valid_y[s,:], (12,1)) for s in range(len(valid_y)) ])
+    expanded_valid_weight = np.hstack([ np.tile(sample_weight_valid[s], 12) for s in range(len(sample_weight_valid)) ])
+  steps_per_epoch = len(expanded_train_x) // BATCH_SIZE
+  reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=.5, patience=4, min_lr=1e-7, verbose=1)
   optimizer = tf.keras.optimizers.Adam(learning_rate=1e-3)
-  clr = CyclicLR(base_lr=1e-7, max_lr=5e-5, step_size=2*steps_per_epoch, mode='triangular')
-  earlyStop = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, min_delta=0.1)
-  model.compile(loss = loss, optimizer = optimizer, metrics = metrics)
+  clr = CyclicLR(base_lr=1e-7, max_lr=5e-4, step_size=2*steps_per_epoch, mode='triangular',
+                 monitor='val_loss', patience=10, factor=0.5, min_delta=1.1, min_max_lr=1e-7, verbose=1)
+  earlyStop = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=20, min_delta=0.01)
+  model.compile(loss = loss, optimizer = optimizer, metrics = metrics, jit_compile=True)
   history = model.fit(
-      x = np.array(df.loc[train_index,keep > 0]),
-      y = np.array(main_label.loc[train_index]),
+      x = expanded_train_x,
+      y = expanded_train_y,
       epochs=epochs,
-      validation_data=(valid_x, valid_y),
+      validation_data=(expanded_valid_x, expanded_valid_y, expanded_valid_weight),
       batch_size=BATCH_SIZE,
-      verbose=True,
+      verbose='auto',
       use_multiprocessing=True,
       workers=tf_cores,
       max_queue_size=tf_cores,
-      callbacks= [ reduce_lr, earlyStop, clr ],
-      sample_weight=sample_weight
+      callbacks= [ earlyStop, clr ],
+      sample_weight=expanded_train_weight
   )
   return [ model, history ]
 
+"""
+# serialize these_labels, beta_norm, combined_pheno_labels, comb_keep and save to disk
+import pickle
+work_dir = '/results/ep/study/hg38s/study250-cfDNA_prelim/cfDNA-MS'
+serialized_data_path = work_dir + "/serialized_data.pkl"
+with open(serialized_data_path, 'wb') as out:
+  pickle.dump([ these_labels, beta_norm, combined_pheno_labels, comb_keep ], out, protocol=pickle.HIGHEST_PROTOCOL)
+
+# load serialized data
+serialized_data_path = work_dir + "/serialized_data.pkl"
+with open(serialized_data_path, 'rb') as inp:
+  these_labels, beta_norm, combined_pheno_labels, comb_keep = pickle.load(inp)
+  keep = comb_keep
+"""
+
+label_df = combined_pheno_labels
 models = []
 for l in these_labels:
   models.append(build_and_train_model(l, beta_norm, combined_pheno_labels, comb_keep))
@@ -289,8 +422,6 @@ random.shuffle(samples)
 beta_norm = beta_norm.loc[samples,:]
 combined_pheno_labels = combined_pheno_labels.loc[samples,:]
 
-from tqdm import tqdm
-
 predictions = []
 for i in tqdm(range(len(these_labels))):
   model = models[i][0]
@@ -339,7 +470,7 @@ sample_weight = np.array([ class_weight[1][abs(class_weight[0] - np.array(sample
 steps_per_epoch = len(train_index) // BATCH_SIZE
 reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=.5, patience=5, min_lr=1e-7)
 optimizer = tf.keras.optimizers.Adam(learning_rate=1e-3)
-clr = CyclicLR(base_lr=1e-9, max_lr=1e-3, step_size=2*steps_per_epoch, mode='triangular')
+clr = CyclicLR(base_lr=1e-9, max_lr=5e-3, step_size=2*steps_per_epoch, mode='triangular')
 earlyStop = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=100)
 combiner.compile(loss = loss, optimizer = optimizer, metrics = metrics)
 history = combiner.fit(

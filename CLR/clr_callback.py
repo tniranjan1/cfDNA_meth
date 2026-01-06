@@ -59,10 +59,18 @@ class CyclicLR(Callback):
             Defines whether scale_fn is evaluated on 
             cycle number or cycle iterations (training
             iterations since start of cycle). Default is 'cycle'.
+        monitor: quantity to be monitored for plateau detection (e.g., 'val_loss').
+            If None, plateau detection is disabled.
+        patience: number of epochs with no improvement after which max_lr will be reduced.
+        factor: factor by which the max_lr will be reduced. new_max_lr = max_lr * factor.
+        min_delta: threshold for measuring the new optimum, to only focus on significant changes.
+        min_max_lr: lower bound on the max learning rate.
+        verbose: 0: quiet, 1: update messages when max_lr is reduced.
     """
 
     def __init__(self, base_lr=0.001, max_lr=0.006, step_size=2000., mode='triangular',
-                 gamma=1., scale_fn=None, scale_mode='cycle'):
+                 gamma=1., scale_fn=None, scale_mode='cycle',, monitor=None, patience=0,
+                 factor=0.5, min_delta=1.1, min_max_lr=0, verbose=0):
         super(CyclicLR, self).__init__()
 
         self.base_lr = base_lr
@@ -86,6 +94,16 @@ class CyclicLR(Callback):
         self.clr_iterations = 0.
         self.trn_iterations = 0.
         self.history = {}
+
+        # Plateau detection parameters
+        self.monitor = monitor
+        self.patience = patience
+        self.factor = factor
+        self.min_delta = min_delta
+        self.min_max_lr = min_max_lr
+        self.verbose = verbose
+        self.wait = 0
+        self.best = None
 
         self._reset()
 
@@ -131,3 +149,34 @@ class CyclicLR(Callback):
             self.history.setdefault(k, []).append(v)
         
         K.set_value(self.model.optimizer.lr, self.clr())
+
+    def on_epoch_end(self, epoch, logs=None):
+        logs = logs or {}
+        
+        # Plateau detection logic
+        if self.monitor and self.monitor in logs:
+            current = logs.get(self.monitor)
+            
+            if current is None:
+                return
+            
+            # Check if current value is better than best
+            if current < self.best:
+                self.best = current
+                self.wait = 0
+            elif current < self.best * self.min_delta:
+                self.wait = 0
+            else:
+                self.wait += 1
+                
+                # Reduce max_lr if patience exceeded
+                if self.wait >= self.patience:
+                    old_max_lr = self.max_lr
+                    new_max_lr = max(self.max_lr * self.factor, self.min_max_lr)
+                    
+                    if new_max_lr != old_max_lr:
+                        self.max_lr = new_max_lr
+                        self.wait = 0
+                        
+                        if self.verbose > 0:
+                            print(f'\nEpoch {epoch + 1}: CyclicLR reducing max_lr from {old_max_lr} to {new_max_lr}')
