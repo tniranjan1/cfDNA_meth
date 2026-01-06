@@ -69,7 +69,7 @@ class CyclicLR(Callback):
     """
 
     def __init__(self, base_lr=0.001, max_lr=0.006, step_size=2000., mode='triangular',
-                 gamma=1., scale_fn=None, scale_mode='cycle',, monitor=None, patience=0,
+                 gamma=1., scale_fn=None, scale_mode='cycle', monitor=None, patience=0,
                  factor=0.5, min_delta=1.1, min_max_lr=0, verbose=0):
         super(CyclicLR, self).__init__()
 
