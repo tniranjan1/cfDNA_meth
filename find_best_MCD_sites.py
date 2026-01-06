@@ -195,7 +195,7 @@ def data_generator(data_vec, batch_size=4):
   """
   Generator that yields batches of data with leukocyte spike-in augmentation.
   
-  For each sample, randomly selects a spike-in fraction (0.5, 0.25, 0.12  5),
+  For each sample, randomly selects a spike-in fraction (0.5, 0.25, 0.125, 0.05, 0.025),
   finds a leukocyte sample, mixes it with the current sample, and converts to binary.
 
   Args:
@@ -205,7 +205,7 @@ def data_generator(data_vec, batch_size=4):
   batch_x = []
   for _ in range(batch_size):
     # spike-in fraction
-    for s in [0.5, 0.25, 0.125]:
+    for s in [0.5, 0.25, 0.125, 0.05, 0.025]:
       # Random leukocyte sample
       i = np.random.choice(leukocyte_indices)
       # Get data vectors
@@ -302,7 +302,7 @@ def build_and_train_model(label, df, label_df, keep):
 #  ])
   model = build_meth_model(n_cpgs=input_size, n_classes=label_size, out_activation=activation)
   ## train model
-  BATCH_SIZE = 48
+  BATCH_SIZE = 60
   epochs = 10000
   main_label = label_df[label]
   train_index = [ item for s in [ group_size(label_df.index[label_df[t] > 0], max_allowed) for t in label ] for item in s ]
@@ -329,19 +329,19 @@ def build_and_train_model(label, df, label_df, keep):
   with Pool(processes=24) as pool:
     items = [ train_x[s,:] for s in range(len(train_x))]
     expanded_train_x = np.vstack(pool.map(data_generator, tqdm(items, total=len(train_x))))
-    expanded_train_y = np.vstack([ np.tile(train_y[s,:], (12,1)) for s in range(len(train_y)) ])
-    expanded_train_weight = np.hstack([ np.tile(sample_weight_train[s], 12) for s in range(len(sample_weight_train)) ])
+    expanded_train_y = np.vstack([ np.tile(train_y[s,:], (20,1)) for s in range(len(train_y)) ])
+    expanded_train_weight = np.hstack([ np.tile(sample_weight_train[s], 20) for s in range(len(sample_weight_train)) ])
     items = [ valid_x[s,:] for s in range(len(valid_x))]
     expanded_valid_x = np.vstack(pool.map(data_generator, tqdm(items, total=len(valid_x))))
-    expanded_valid_y = np.vstack([ np.tile(valid_y[s,:], (12,1)) for s in range(len(valid_y)) ])
-    expanded_valid_weight = np.hstack([ np.tile(sample_weight_valid[s], 12) for s in range(len(sample_weight_valid)) ])
+    expanded_valid_y = np.vstack([ np.tile(valid_y[s,:], (20,1)) for s in range(len(valid_y)) ])
+    expanded_valid_weight = np.hstack([ np.tile(sample_weight_valid[s], 20) for s in range(len(sample_weight_valid)) ])
   steps_per_epoch = len(expanded_train_x) // BATCH_SIZE
   reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=.5, patience=4, min_lr=1e-7, verbose=1)
   optimizer = tf.keras.optimizers.Adam(learning_rate=1e-3)
   clr = CyclicLR(base_lr=1e-7, max_lr=5e-4, step_size=2*steps_per_epoch, mode='triangular',
                  monitor='val_loss', patience=10, factor=0.5, min_delta=1.1, min_max_lr=1e-7, verbose=1)
   earlyStop = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=20, min_delta=0.01)
-  model.compile(loss = loss, optimizer = optimizer, metrics = metrics, jit_compile=True)
+  model.compile(loss = loss, optimizer = optimizer, weighted_metrics = metrics, jit_compile=True)
   history = model.fit(
       x = expanded_train_x,
       y = expanded_train_y,
