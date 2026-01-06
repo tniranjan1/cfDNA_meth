@@ -136,6 +136,9 @@ these_labels = [ [ 'Control-NCx', 'Control-WM', 'Control-Cerebellum', 'FCD1A', '
                  [ 'isMS', 'non-MS' ], [ 'MS_normal' ], [ 'MS_abnormal' ], [ 'MS' ], [ 'Control-WM' ], [ 'Demy_MS_Hipp' ], [ 'My_MS_Hipp' ],
                  [ 'leukocyte' ] ]
 
+my_labels = [ [ 'FCD', 'non-FCD' ], [ 'TLE', 'non-TLE' ],
+                 [ 'FCD1A', 'FCD2A', 'FCD2B', 'FCD3A', 'FCD3B', 'FCD3C', 'FCD3D', 'non-FCD' ] ]
+
 train_size = { 'Control-NCx'        :  60, #462,
                'Control-WM'         :  16,
                'Control-Cerebellum' :  29,
@@ -213,13 +216,11 @@ def data_generator(data_vec, batch_size=4):
       row_l = np.array(beta_norm.loc[i,keep > 0])
       # Mix: d = (1-s)*row_l + s*row_r
       d = ((1 - s) * row_l) + (s * row_r)
-      # Convert to binary: each element has probability p of being 1
-      d_binary = (np.random.rand(len(d)) < d).astype(np.float32)
-      batch_x.append(d_binary)
+      batch_x.append(d)
   return np.array(batch_x)
 
-def build_meth_model(n_cpgs, n_classes, proj_dim=512, l1_proj=1e-6, l2_proj=1e-5,
-                     l2_hidden=1e-4, noise_std=0.01, out_activation="softmax"):
+def build_meth_model(n_cpgs, n_classes, proj_dim=64, l1_proj=1e-4, l2_proj=1e-4,
+                     l2_hidden=1e-3, noise_std=0.01, out_activation="softmax"):
     """
     Neural network for cfDNA single-read methylation classification.
     Parameters
@@ -246,8 +247,10 @@ def build_meth_model(n_cpgs, n_classes, proj_dim=512, l1_proj=1e-6, l2_proj=1e-5
     tf.keras.Model
     """
     inputs = layers.Input(shape=(n_cpgs,), name="methylation_input")
+    # Convert to binary: each element has probability p of being 1
+    x = layers.Lambda(lambda x: K.cast(K.greater_equal(x, K.random_uniform(K.shape(x))), dtype='float32'))(inputs)
     # ---- Input noise and dropout(models cfDNA sampling noise) ----
-    x = layers.GaussianNoise(stddev=noise_std, name="input_noise")(inputs)
+    x = layers.GaussianNoise(stddev=noise_std, name="input_noise")(x)
 #    x = layers.Dropout(0.1, name="input_dropout")(x)
     # ---- Sparse linear projection ----
     x = layers.Dense(proj_dim, activation="linear",
@@ -255,18 +258,18 @@ def build_meth_model(n_cpgs, n_classes, proj_dim=512, l1_proj=1e-6, l2_proj=1e-5
         name="projection_dense")(x)
     x = layers.BatchNormalization(name="projection_batchnorm")(x)
     x = layers.Activation("relu", name="projection_relu")(x)
-    x = layers.Dropout(0.5, name="projection_dropout")(x)
+    x = layers.Dropout(0.6, name="projection_dropout")(x)
     # ---- Hidden layer 1 ----
-    x = layers.Dense(proj_dim // 2, activation="relu",
+    x = layers.Dense(proj_dim // 4, activation="relu",
         kernel_regularizer=keras.regularizers.l2(l2_hidden),
         name="hidden_dense_1")(x)
     x = layers.BatchNormalization(name="hidden_batchnorm_1")(x)
-    x = layers.Dropout(0.4, name="hidden_dropout_1")(x)
+    x = layers.Dropout(0.6, name="hidden_dropout_1")(x)
     # ---- Hidden layer 2 ----
-    x = layers.Dense(proj_dim // 8, activation="relu",
-        kernel_regularizer=keras.regularizers.l2(l2_hidden),
-        name="hidden_dense_2")(x)
-    x = layers.Dropout(0.3, name="hidden_dropout_2")(x)
+#    x = layers.Dense(proj_dim // 8, activation="relu",
+#        kernel_regularizer=keras.regularizers.l2(l2_hidden),
+#        name="hidden_dense_2")(x)
+#    x = layers.Dropout(0.3, name="hidden_dropout_2")(x)
     # ---- Output ----
     outputs = layers.Dense(n_classes, activation=out_activation,
         name="output")(x)
@@ -339,7 +342,7 @@ def build_and_train_model(label, df, label_df, keep):
   reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=.5, patience=4, min_lr=1e-7, verbose=1)
   optimizer = tf.keras.optimizers.Adam(learning_rate=1e-3)
   clr = CyclicLR(base_lr=1e-7, max_lr=5e-4, step_size=2*steps_per_epoch, mode='triangular',
-                 monitor='val_loss', patience=10, factor=0.5, min_delta=1.1, min_max_lr=1e-7, verbose=1)
+                 monitor='val_loss', patience=8, factor=0.5, min_delta=0.99, min_max_lr=1e-7, verbose=1)
   earlyStop = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=20, min_delta=0.01)
   model.compile(loss = loss, optimizer = optimizer, weighted_metrics = metrics, jit_compile=True)
   history = model.fit(
@@ -374,7 +377,7 @@ with open(serialized_data_path, 'rb') as inp:
 
 label_df = combined_pheno_labels
 models = []
-for l in these_labels:
+for l in my_labels:
   models.append(build_and_train_model(l, beta_norm, combined_pheno_labels, comb_keep))
 
 model_save_folder = "all_models_01_2026"
