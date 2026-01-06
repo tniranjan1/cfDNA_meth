@@ -103,7 +103,7 @@ class CyclicLR(Callback):
         self.min_max_lr = min_max_lr
         self.verbose = verbose
         self.wait = 0
-        self.best = None
+        self.best = 1e6
 
         self._reset()
 
