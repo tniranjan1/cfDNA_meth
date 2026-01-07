@@ -219,8 +219,8 @@ def data_generator(data_vec, batch_size=4):
       batch_x.append(d)
   return np.array(batch_x)
 
-def build_meth_model(n_cpgs, n_classes, proj_dim=64, l1_proj=1e-4, l2_proj=1e-4,
-                     l2_hidden=1e-3, noise_std=0.01, out_activation="softmax"):
+def build_meth_model(n_cpgs, n_classes, proj_dim=128, l1_proj=1e-5, l2_proj=1e-5,
+                     l2_hidden=1e-4, noise_std=0.01, out_activation="softmax"):
     """
     Neural network for cfDNA single-read methylation classification.
     Parameters
@@ -258,13 +258,13 @@ def build_meth_model(n_cpgs, n_classes, proj_dim=64, l1_proj=1e-4, l2_proj=1e-4,
         name="projection_dense")(x)
     x = layers.BatchNormalization(name="projection_batchnorm")(x)
     x = layers.Activation("relu", name="projection_relu")(x)
-    x = layers.Dropout(0.6, name="projection_dropout")(x)
+    x = layers.Dropout(0.4, name="projection_dropout")(x)
     # ---- Hidden layer 1 ----
     x = layers.Dense(proj_dim // 4, activation="relu",
         kernel_regularizer=keras.regularizers.l2(l2_hidden),
         name="hidden_dense_1")(x)
     x = layers.BatchNormalization(name="hidden_batchnorm_1")(x)
-    x = layers.Dropout(0.6, name="hidden_dropout_1")(x)
+    x = layers.Dropout(0.3, name="hidden_dropout_1")(x)
     # ---- Hidden layer 2 ----
 #    x = layers.Dense(proj_dim // 8, activation="relu",
 #        kernel_regularizer=keras.regularizers.l2(l2_hidden),
@@ -285,7 +285,7 @@ def build_and_train_model(label, df, label_df, keep):
     activation = 'sigmoid'
     ml = False
   else:
-    loss = tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.05)
+    loss = tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.0)
     activation = 'softmax'
     ml = True
   metrics = [ tf.keras.metrics.AUC(multi_label=ml, num_labels=len(label)),
@@ -338,10 +338,19 @@ def build_and_train_model(label, df, label_df, keep):
     expanded_valid_x = np.vstack(pool.map(data_generator, tqdm(items, total=len(valid_x))))
     expanded_valid_y = np.vstack([ np.tile(valid_y[s,:], (20,1)) for s in range(len(valid_y)) ])
     expanded_valid_weight = np.hstack([ np.tile(sample_weight_valid[s], 20) for s in range(len(sample_weight_valid)) ])
+  # print to screen a comparison between the sample label distributions between expanded_train and expaneded_valid
+  print("Training label distribution:")
+  unique, counts = np.unique(expanded_train_y, return_counts=True, axis=0)
+  for u in range(len(unique)):
+    print(f"Label {unique[u]}: {counts[u]} ({counts[u] / counts.sum() * 100:.2f}%)")
+  print("Validation label distribution:")
+  unique, counts = np.unique(expanded_valid_y, return_counts=True, axis=0)
+  for u in range(len(unique)):
+    print(f"Label {unique[u]}: {counts[u]} ({counts[u] / counts.sum() * 100:.2f}%)")
   steps_per_epoch = len(expanded_train_x) // BATCH_SIZE
   reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=.5, patience=4, min_lr=1e-7, verbose=1)
   optimizer = tf.keras.optimizers.Adam(learning_rate=1e-3)
-  clr = CyclicLR(base_lr=1e-7, max_lr=5e-4, step_size=2*steps_per_epoch, mode='triangular',
+  clr = CyclicLR(base_lr=1e-7, max_lr=5e-5, step_size=2*steps_per_epoch, mode='triangular',
                  monitor='val_loss', patience=8, factor=0.5, min_delta=0.99, min_max_lr=1e-7, verbose=1)
   earlyStop = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=20, min_delta=0.01)
   model.compile(loss = loss, optimizer = optimizer, weighted_metrics = metrics, jit_compile=True)
@@ -389,6 +398,27 @@ for m in range(len(models)):
 model_save_path = model_save_folder + "/model_histories.pkl"
 with open(model_save_path, 'wb') as out:
   pickle.dump([ [ m[1].epoch, m[1].history ] for m in models ], out, protocol=pickle.HIGHEST_PROTOCOL)
+
+# for each model, history lin models, reconstruct the model with the lambda layer removed
+new_models = []
+for i in range(len(models)):
+  old_model = models[i][0]
+  label = these_labels[i]
+  if len(label) == 1:
+    activation = 'sigmoid'
+  else:
+    activation = 'softmax'
+  input_size = (keep > 0).sum()
+  label_size = len(label)
+  new_model = Sequential()
+  new_model.add(layers.InputLayer(input_shape=(input_size,)))
+  for layer in old_model.layers[1:-1]:
+    new_model.add(layer)
+  new_model.add(layers.Dense(label_size, activation=activation, name="output"))
+  new_model.set_weights(old_model.get_weights())
+  new_models.append([ new_model, models[i][1] ])
+
+models = new_models
 
 from matplotlib.backends.backend_pdf import PdfPages
 
