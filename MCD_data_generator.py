@@ -215,6 +215,41 @@ def build_sample_weights(main_label, sample_index) -> np.ndarray:
 from multiprocessing import Pool
 from tqdm import tqdm
 
+# Global variables for worker processes
+_beta_norm = None
+_keep = None
+_combined_pheno_labels = None
+
+def _init_worker(beta_norm, keep, combined_pheno_labels):
+    """
+    Initialize worker process with shared data.
+
+    Args:
+        beta_norm (pd.DataFrame): DataFrame of normalized beta values
+        keep (np.ndarray): Boolean array indicating CpG sites to keep
+        combined_pheno_labels (pd.DataFrame): DataFrame of combined phenotype labels
+
+    Returns:
+        None
+    """
+    global _beta_norm, _keep, _combined_pheno_labels
+    _beta_norm = beta_norm
+    _keep = keep
+    _combined_pheno_labels = combined_pheno_labels
+
+def _data_augmentor_wrapper(args):
+    """
+    Wrapper that uses global variables instead of passing large objects.
+    
+    Args:
+        args (tuple): Tuple containing data_vec and dup_size
+
+    Returns:
+        np.ndarray: Augmented data batch
+    """
+    data_vec, dup_size = args
+    return data_augmentor(data_vec, _beta_norm, _keep, _combined_pheno_labels, dup_size)
+
 # build model function
 def data_generator(current_label, beta_norm, combined_pheno_labels,
                    keep, max_allowed, max_valid, these_labels) -> dict:
@@ -260,18 +295,17 @@ def data_generator(current_label, beta_norm, combined_pheno_labels,
     valid_y = np.array(label_df[current_label].loc[valid_index])
     # build class adjusted weights for validation samples
     valid_w = build_sample_weights(main_label, valid_index)
-    with Pool(processes=24) as pool:
+    with Pool(processes=24, initializer=_init_worker,
+              initargs=(beta_norm, keep, combined_pheno_labels)) as pool:
         d = 4 # duplication factor for augmentation
-        # Ease of reading
-        b, k, c = beta_norm, keep, combined_pheno_labels
         # Augment training data
-        items = [ (train_x[s,:], b, k, c, d) for s in range(len(train_x))]
-        expanded_train_x = np.vstack(pool.starmap(data_augmentor, tqdm(items, desc="Augment training")))
+        items = tqdm([ (train_x[s,:], d) for s in range(len(train_x))], desc="Augment training")
+        expanded_train_x = np.vstack(pool.starmap(_data_augmentor_wrapper, items, chunksize=1))
         expanded_train_y = np.vstack([ np.tile(train_y[s,:], (5*d,1)) for s in range(len(train_y)) ])
         expanded_train_w = np.hstack([ np.tile(train_w[s], 5*d) for s in range(len(train_w)) ])
         # Augment validation data
-        items = [ (valid_x[s,:], b, k, c, d) for s in range(len(valid_x))]
-        expanded_valid_x = np.vstack(pool.starmap(data_augmentor, tqdm(items, desc="Augment validation")))
+        items = tqdm([ (valid_x[s,:], d) for s in range(len(valid_x))], desc="Augment validation")
+        expanded_valid_x = np.vstack(pool.starmap(_data_augmentor_wrapper, items, chunksize=1))
         expanded_valid_y = np.vstack([ np.tile(valid_y[s,:], (5*d,1)) for s in range(len(valid_y)) ])
         expanded_valid_w = np.hstack([ np.tile(valid_w[s], 5*d) for s in range(len(valid_w)) ])
     # print to screen a comparison between the sample label distributions between
