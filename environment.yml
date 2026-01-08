@@ -16,3 +16,4 @@ dependencies:
   - h5py
   - tensorflow=2.12.*
   - p-tqdm=1.4.0
+  - optuna=4.6.0
