@@ -85,7 +85,6 @@ train_size = mdg.get_training_sizes()
 # max valid number of samples per label
 max_allowed, max_valid = mdg.get_allowed_sizes(these_labels, train_size, combined_pheno_labels,max_size=60)
 
-label_df = combined_pheno_labels
 studies = {}
 for label in these_labels:
     data_dict = mdg.data_generator(label, beta_norm, combined_pheno_labels,

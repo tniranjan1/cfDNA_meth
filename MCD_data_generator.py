@@ -265,12 +265,12 @@ def data_generator(current_label, beta_norm, combined_pheno_labels,
         # Ease of reading
         b, k, c = beta_norm, keep, combined_pheno_labels
         # Augment training data
-        items = [ (train_x[s,:], b, k, c, d, s) for s in range(len(train_x))]
+        items = [ (train_x[s,:], b, k, c, d) for s in range(len(train_x))]
         expanded_train_x = np.vstack(pool.starmap(data_augmentor, tqdm(items, desc="Augment training")))
         expanded_train_y = np.vstack([ np.tile(train_y[s,:], (5*d,1)) for s in range(len(train_y)) ])
         expanded_train_w = np.hstack([ np.tile(train_w[s], 5*d) for s in range(len(train_w)) ])
         # Augment validation data
-        items = [ (valid_x[s,:], b, k, c, d, s) for s in range(len(valid_x))]
+        items = [ (valid_x[s,:], b, k, c, d) for s in range(len(valid_x))]
         expanded_valid_x = np.vstack(pool.starmap(data_augmentor, tqdm(items, desc="Augment validation")))
         expanded_valid_y = np.vstack([ np.tile(valid_y[s,:], (5*d,1)) for s in range(len(valid_y)) ])
         expanded_valid_w = np.hstack([ np.tile(valid_w[s], 5*d) for s in range(len(valid_w)) ])
