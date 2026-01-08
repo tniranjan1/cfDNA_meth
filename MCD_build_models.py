@@ -15,7 +15,7 @@ def binarization_layer(x: tf.Tensor) -> tf.Tensor:
     Returns:
         tf.Tensor: Binarized tensor
     """
-    return K.cast(K.greater_equal(x, K.random_uniform(K.shape(x))), dtype='float32')
+    return K.cast(K.greater_equal(x, K.random_uniform(K.shape(x))), dtype='float16')
 
 ##-----------------------------------------------------------------------------------------------##
 
@@ -46,7 +46,7 @@ def build_meth_model(n_cpgs, n_classes, proj_dim=128, l1_proj=1e-5, l2_proj=1e-5
     Returns:
         tf.keras.Model: Compiled Keras model
     """
-    inputs = layers.Input(shape=(n_cpgs,), name="methylation_input")
+    inputs = layers.Input(shape=(n_cpgs,), dtype='float16', name="methylation_input")
     if singleton:
         x = layers.Lambda(lambda x: binarization_layer(x))(inputs)
     else:
@@ -69,50 +69,8 @@ def build_meth_model(n_cpgs, n_classes, proj_dim=128, l1_proj=1e-5, l2_proj=1e-5
                 kernel_regularizer=keras.regularizers.l2(l2_hidden),
                 name="hidden_dense_2")(x)
             x = layers.Dropout(dropout_h2, name="hidden_dropout_2")(x)
-    outputs = layers.Dense(n_classes, activation=out_activation, name="output")(x)
+    outputs = layers.Dense(n_classes, activation=out_activation,
+                           dtype='float32', name="output")(x)
     return tf.keras.models.Model(inputs=inputs, outputs=outputs, name="meth_classifier")
-
-##-----------------------------------------------------------------------------------------------##
-
-from time import time
-import os
-
-class MetricsLogger(tf.keras.callbacks.Callback):
-    """
-    Custom callback to log training metrics to a file after each epoch.
-    
-    Logs epoch number, epoch duration, and all training/validation metrics
-    to a specified file, appending one line per epoch.
-    """
-    def __init__(self, filepath, trial_number=None):
-        super().__init__()
-        self.filepath = filepath
-        self.trial_number = trial_number
-        self.epoch_start_time = None
-    def on_train_begin(self, logs=None):
-        # Write header if file doesn't exist
-        self.header = "trial\tepoch\tduration (sec)"
-        self.write_header = True
-    def on_epoch_begin(self, epoch, logs=None):
-        self.epoch_start_time = time()
-    def on_epoch_end(self, epoch, logs=None):
-        duration = time() - self.epoch_start_time if self.epoch_start_time is not None else 0
-        # Build the log line
-        trial_str = f"{self.trial_number}\t" if self.trial_number is not None else ""
-        log_line = f"{trial_str}{epoch+1}\t{duration:.2f}"
-        # Add all metrics
-        if logs:
-            for key, value in sorted(logs.items()):
-                log_line += f"\t{value:.6f}"
-                if self.write_header:
-                    self.header += f"\t{key}"
-        # Write header if needed
-        if self.write_header:
-            with open(self.filepath, 'a') as f:
-                f.write(self.header + "\n")
-            self.write_header = False
-        # Append to file
-        with open(self.filepath, 'a') as f:
-            f.write(log_line + "\n")
 
 ##-----------------------------------------------------------------------------------------------##

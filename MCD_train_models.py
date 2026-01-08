@@ -28,6 +28,8 @@ else:
     # store beta_norm for later use
     with open(work_dir + "/beta_norm.pkl", "wb") as f:
         pickle.dump(beta_norm, f)
+# convert beta_norm to float16 to save memory
+beta_norm = beta_norm.astype('float16')
 
 ##-----------------------------------------------------------------------------------------------##
 

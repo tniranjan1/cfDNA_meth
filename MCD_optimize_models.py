@@ -6,7 +6,7 @@ import tensorflow as tf
 import numpy as np
 import optuna
 from CLR.clr_callback import CyclicLR
-from MCD_build_models import build_meth_model, MetricsLogger
+from MCD_build_models import build_meth_model
 
 # set tensorflow threading
 tf.function(jit_compile=True)
