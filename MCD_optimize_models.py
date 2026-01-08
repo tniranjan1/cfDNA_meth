@@ -88,8 +88,8 @@ def objective(trial: optuna.Trial, Xtrn, Ytrn, Wtrn, Xval, Yval, Wval, singleton
                              dropout_h1=dropout_h1, dropout_h2=dropout_h2,
                              use_hidden1=use_hidden1, use_hidden2=use_hidden2,
                              out_activation=out_activation, singleton=singleton)
-    metrics = [ tf.keras.metrics.AUC(multi_label=False, num_labels=n_classes, name="auc_roc"),
-                tf.keras.metrics.AUC(curve="PR", multi_label=False, num_labels=n_classes, name="auc_pr"),
+    metrics = [ tf.keras.metrics.AUC(multi_label=False, name="auc_roc"),
+                tf.keras.metrics.AUC(curve="PR", multi_label=False, name="auc_pr"),
                 tf.keras.metrics.Precision(name="precision"), 
                 tf.keras.metrics.Recall(name="recall") ]
     BATCH_SIZE = 64
