@@ -78,6 +78,8 @@ combined_pheno_labels = combined_pheno_labels.loc[samples,:]
 
 import MCD_data_generator as mdg
 from MCD_optimize_models import study_training
+import sys
+import datetime
 
 # labels to use
 these_labels = mdg.construct_label_combos()
@@ -87,9 +89,25 @@ max_allowed, max_valid = mdg.get_allowed_sizes(these_labels, train_size, combine
 
 studies = {}
 for label in these_labels:
-    data_dict = mdg.data_generator(label, beta_norm, combined_pheno_labels,
-                                   keep, max_allowed, max_valid, these_labels)
-    data_dict['singleton'] = True # simulate single-read sampling
-    studies[label] = study_training(**data_dict)
+    l_name = '_'.join(label)
+    current_data_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    f_out = work_dir + f"/model_training/study_{l_name}.{current_data_time}.log"
+    # make parent dir if it doesn't exist
+    os.makedirs(os.path.dirname(f_out), exist_ok=True)
+    # Save original stdout
+    original_stdout = sys.stdout
+    try:
+        # re-direct all stdout to log file
+        with open(f_out, "a") as f:
+            sys.stdout = f
+            print(f"Starting training study for label combo: {l_name}")
+            # generate data dict for this label combo
+            data_dict = mdg.data_generator(label, beta_norm, combined_pheno_labels,
+                                           keep, max_allowed, max_valid, these_labels)
+            data_dict['singleton'] = True # simulate single-read sampling
+            studies[label] = study_training(**data_dict)
+    finally:
+        # Restore original stdout
+        sys.stdout = original_stdout
 
 ##-----------------------------------------------------------------------------------------------##

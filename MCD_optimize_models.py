@@ -6,11 +6,13 @@ import tensorflow as tf
 import numpy as np
 import optuna
 from CLR.clr_callback import CyclicLR
-from MCD_build_models import build_meth_model
+from MCD_build_models import build_meth_model, MetricsLogger
 
 # set tensorflow threading
 tf.function(jit_compile=True)
 tf.config.optimizer.set_jit(True)
+tf.config.threading.set_intra_op_parallelism_threads(80)  # Parallel ops within layers
+tf.config.threading.set_inter_op_parallelism_threads(80)  # Parallel independent ops
 
 ##-----------------------------------------------------------------------------------------------##
 
@@ -92,33 +94,43 @@ def objective(trial: optuna.Trial, Xtrn, Ytrn, Wtrn, Xval, Yval, Wval, singleton
                 tf.keras.metrics.AUC(curve="PR", multi_label=False, name="auc_pr"),
                 tf.keras.metrics.Precision(name="precision"), 
                 tf.keras.metrics.Recall(name="recall") ]
-    BATCH_SIZE = 64
+    BATCH_SIZE = 128
     steps_per_epoch = n_train_samples // BATCH_SIZE
     optimizer = tf.keras.optimizers.Adam(learning_rate=start_lr)
     clr = CyclicLR(base_lr=1e-7, max_lr=start_lr, step_size=2*steps_per_epoch,
                    mode='triangular', monitor='val_loss', patience=8, factor=0.5, min_delta=0.99,
                    min_max_lr=1e-7, verbose=1)
     earlyStop = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=20)
+    log_file = f"trial_{trial.number}_metrics_log.csv"
+#    metrics_logger = MetricsLogger(log_file, trial_number=trial.number)
     model.compile(optimizer=optimizer, loss=loss, weighted_metrics = metrics, jit_compile=True)
     callbacks = [ earlyStop, clr ]
+    # Convert to tf.data.Dataset for optimized pipeline
+    AUTOTUNE = tf.data.AUTOTUNE
+    train_dataset = tf.data.Dataset.from_tensor_slices((Xtrn, Ytrn, Wtrn))
+    train_dataset = train_dataset.cache()  # Cache in memory
+    train_dataset = train_dataset.shuffle(buffer_size=1000)
+    train_dataset = train_dataset.batch(BATCH_SIZE)
+    train_dataset = train_dataset.prefetch(AUTOTUNE)  # Prefetch batches
+    val_dataset = tf.data.Dataset.from_tensor_slices((Xval, Yval, Wval))
+    val_dataset = val_dataset.batch(BATCH_SIZE)
+    val_dataset = val_dataset.cache()
+    val_dataset = val_dataset.prefetch(AUTOTUNE)
     # print summary of hyperparameters for this trial
     print(f"Trial {trial.number} hyperparameters:")
     for key, value in trial.params.items():
         print(f"  {key}: {value}")
     # Train model
-    history = model.fit(x = Xtrn,
-                        y = Ytrn,
-                        sample_weight = Wtrn,
-                        validation_data=(Xval, Yval, Wval),
+    history = model.fit(train_dataset,
+                        validation_data=val_dataset,
                         epochs=1000,
                         batch_size=BATCH_SIZE,
-                        verbose='auto',
+                        verbose=2,  # type: ignore[arg-type]
                         shuffle=True,
                         callbacks=callbacks,
                         use_multiprocessing=True,
-                        workers=os.cpu_count() or 1,
-                        max_queue_size=os.cpu_count() or 1
-                    )
+                        workers=os.cpu_count() or 80,
+                        max_queue_size=os.cpu_count() or 80)
     # Optimize for validation PR AUC if available; fallback to ROC AUC and then val_loss
     if history is None:
         return 0.0
@@ -143,6 +155,10 @@ def study_training(Xtrn, Ytrn, Wtrn, Xval, Yval, Wval, singleton=False) -> optun
         Xval (np.ndarray): Validation feature matrix
         Yval (np.ndarray): Validation label matrix
         Wval (np.ndarray): Validation sample weights
+        singleton (bool): Whether to use singleton mode (affects data augmentation)
+
+    Returns:
+        optuna.Study: The completed Optuna study object containing optimization results.
     """
     study = optuna.create_study(direction="maximize")
     study.optimize(lambda trial:

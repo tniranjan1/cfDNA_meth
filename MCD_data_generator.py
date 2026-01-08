@@ -318,7 +318,6 @@ def data_generator(current_label, beta_norm, combined_pheno_labels,
         dict: Dictionary containing training and validation data, labels, and weights
     """
     label_df = combined_pheno_labels
-    print(current_label)
     main_label = label_df[current_label]
     prms = { 'max_allowed': max_allowed, 'label_df': label_df, 'these_labels': these_labels }
     # get samples for training set
@@ -357,8 +356,9 @@ def data_generator(current_label, beta_norm, combined_pheno_labels,
         expanded_valid_x = np.vstack(pool.map(_data_augmentor_wrapper, items, chunksize=1))
         expanded_valid_y = np.vstack([ np.tile(valid_y[s,:], (5*d,1)) for s in range(len(valid_y)) ])
         expanded_valid_w = np.hstack([ np.tile(valid_w[s], 5*d) for s in range(len(valid_w)) ])
-    # print to screen a comparison between the sample label distributions between
+    # print a comparison between the sample label distributions between
     #   expanded_train_y and expanded_valid_y
+    print(current_label)
     print("Training label distribution:")
     unique, counts = np.unique(expanded_train_y, return_counts=True, axis=0)
     for u in range(len(unique)):
