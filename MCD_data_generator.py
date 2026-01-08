@@ -127,23 +127,72 @@ def get_allowed_sizes(these_labels, train_size, combined_pheno_labels, max_size=
 
 def group_size(sampleset, max_allowed, label_df, these_labels) -> pd.Index:
     """
-    Reduce sample set to fit within maximum allowed size.
+    Reduce sample set to fit within maximum allowed size per label category.
+    
+    This function iteratively removes samples from the end of the sample set
+    until the count of samples in each label category is within the allowed
+    maximum. Samples are removed in reverse order (last to first) to maintain
+    reproducibility when combined with a fixed random seed.
     
     Args:
-        sampleset (pd.Index): Index of sample names
-        max_allowed (pd.Series): Series of maximum allowed sizes for each label
-        label_df (pd.DataFrame): DataFrame of combined phenotype labels
-        these_labels (list): List of label combinations
+        sampleset (pd.Index): Index of sample names to potentially reduce
+        max_allowed (pd.Series): Series of maximum allowed sizes for each label,
+                                 indexed by label name
+        label_df (pd.DataFrame): DataFrame of combined phenotype labels where
+                                 rows are samples and columns are label categories
+        these_labels (list): List of label combinations; these_labels[0] contains
+                            the primary label column names to check
     
     Returns:
-        pd.Index: Reduced index of sample names
+        pd.Index: Reduced index of sample names that fits within max_allowed limits
+    
+    Example:
+        If max_allowed = {'LabelA': 50, 'LabelB': 30} and the sampleset has
+        60 samples with LabelA and 25 with LabelB, this function will remove
+        10 LabelA samples to bring it within the limit.
     """
-    where_too_large = label_df[these_labels[0]].loc[sampleset].sum() > max_allowed
-    while any(label_df[these_labels[0]].loc[sampleset].sum() > max_allowed):
-        toremove = sampleset[label_df[these_labels[0]].loc[sampleset,where_too_large].sum(axis=1) > 0][-1]
-        sampleset = sampleset[sampleset != toremove]
-        where_too_large = label_df[these_labels[0]].loc[sampleset].sum() > max_allowed
-    return sampleset
+    # Extract the primary label column names from the nested list structure
+    labels = these_labels[0]
+    # Create a subset DataFrame containing only the samples in sampleset
+    # and only the columns for the labels we're checking
+    label_subset = label_df[labels].loc[sampleset]
+    # Convert max_allowed Series to numpy array for faster comparison operations
+    max_arr = max_allowed.values
+    # Early exit: if all label counts are already within limits, return unchanged
+    # label_subset.sum() gives count of samples per label (since labels are 0/1)
+    # .values converts to numpy array for element-wise comparison with max_arr
+    if not any(label_subset.sum().values > max_arr):
+        return sampleset
+    # Initialize boolean mask to track which samples to keep (True = keep)
+    # Start with all True, then flip to False for samples we want to remove
+    keep_mask = np.ones(len(sampleset), dtype=bool)
+    # Calculate current count of samples per label category
+    # .values converts DataFrame to numpy for faster operations
+    # .sum(axis=0) sums down columns, giving count per label
+    current_counts = label_subset.values.sum(axis=0)
+    # Iterate backwards through samples (last to first)
+    # range(len-1, -1, -1) goes from last index down to 0
+    for i in range(len(sampleset) - 1, -1, -1):
+        # Check if we've reduced all labels to within limits; if so, stop early
+        if not any(current_counts > max_arr):
+            break
+        # Boolean array: True for each label that exceeds its maximum
+        over_limit = current_counts > max_arr
+        # Get this sample's label values (row i from the label matrix)
+        # Each element is 1 if sample has that label, 0 otherwise
+        row = label_subset.values[i]
+        # Check if this sample contributes to any over-limit label
+        # row[over_limit] selects only the labels that are over limit
+        # (... > 0).any() checks if sample has any of those labels
+        if (row[over_limit] > 0).any():
+            # Subtract this sample's contribution from running counts
+            # This effectively "removes" the sample from the count
+            current_counts -= row
+            # Mark this sample for removal in the output
+            keep_mask[i] = False
+    # Return only the samples marked True in keep_mask
+    # Boolean indexing on pd.Index returns a filtered pd.Index
+    return sampleset[keep_mask]
 
 ##-----------------------------------------------------------------------------------------------##
 
