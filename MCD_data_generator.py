@@ -300,12 +300,12 @@ def data_generator(current_label, beta_norm, combined_pheno_labels,
         d = 4 # duplication factor for augmentation
         # Augment training data
         items = tqdm([ (train_x[s,:], d) for s in range(len(train_x))], desc="Augment training")
-        expanded_train_x = np.vstack(pool.starmap(_data_augmentor_wrapper, items, chunksize=1))
+        expanded_train_x = np.vstack(pool.map(_data_augmentor_wrapper, items, chunksize=1))
         expanded_train_y = np.vstack([ np.tile(train_y[s,:], (5*d,1)) for s in range(len(train_y)) ])
         expanded_train_w = np.hstack([ np.tile(train_w[s], 5*d) for s in range(len(train_w)) ])
         # Augment validation data
         items = tqdm([ (valid_x[s,:], d) for s in range(len(valid_x))], desc="Augment validation")
-        expanded_valid_x = np.vstack(pool.starmap(_data_augmentor_wrapper, items, chunksize=1))
+        expanded_valid_x = np.vstack(pool.map(_data_augmentor_wrapper, items, chunksize=1))
         expanded_valid_y = np.vstack([ np.tile(valid_y[s,:], (5*d,1)) for s in range(len(valid_y)) ])
         expanded_valid_w = np.hstack([ np.tile(valid_w[s], 5*d) for s in range(len(valid_w)) ])
     # print to screen a comparison between the sample label distributions between
