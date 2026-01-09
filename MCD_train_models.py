@@ -96,22 +96,6 @@ BATCH_SIZE = 128
 
 from multiprocessing import Pool
 
-# Global variables for worker processes
-_training_data_dict = {}
-_work_dir = ''
-
-def _init_worker(training_data_dict, work_dir):
-    """
-    Initializer function for worker processes.
-    
-    Called once per worker process to load pre-generated training data
-    into the process's memory space.
-    """
-    global _training_data_dict, _work_dir
-    
-    _training_data_dict = training_data_dict
-    _work_dir = work_dir
-
 def _train_label_study(label, data_dict, f_out) -> tuple:
     """
     Worker function to train a single label's study in a separate process.
@@ -145,6 +129,7 @@ def _train_label_study(label, data_dict, f_out) -> tuple:
 ##-----------------------------------------------------------------------------------------------##
 
 import time
+import gc
 
 # Loop through label combinations and train models in parallel (2-3 at a time)
 n_processes = 3  # Number of labels to train simultaneously
@@ -157,17 +142,17 @@ with Pool(processes=n_processes) as pool:
         if len(pending_results) >= n_processes:
             # Find the first result that's ready (don't wait for oldest, wait for any)
             while True:
-                for i, (pending_label, _, pending_async) in enumerate(pending_results):
+                for i, (pending_label, pending_async) in enumerate(pending_results):
                     if pending_async.ready():  # Check if this result is available
                         # Found a completed result, pop it and process
-                        oldest_label, _, oldest_async = pending_results.pop(i)
+                        completed_label, completed_async = pending_results.pop(i)
                         try:
-                            study_result = oldest_async.get()
-                            studies[oldest_label] = study_result
-                            completed_idx = these_labels.index(oldest_label) + 1
-                            print(f"[{completed_idx}/{len(these_labels)}] Completed training for: {'_'.join(oldest_label)}")
+                            study_result = completed_async.get()
+                            studies[completed_label] = study_result
+                            completed_idx = these_labels.index(completed_label) + 1
+                            print(f"[{completed_idx}/{len(these_labels)}] Completed training for: {'_'.join(completed_label)}")
                         except Exception as e:
-                            print(f"Error training label {oldest_label}: {e}")
+                            print(f"Error training label {completed_label}: {e}")
                         break
                 else:
                     # No results ready yet, sleep briefly and retry
@@ -195,7 +180,9 @@ with Pool(processes=n_processes) as pool:
             sys.stdout = original_stdout
         # Submit job and add to pending queue
         async_result = pool.apply_async(_train_label_study, (label, data_dict, f_out))
-        pending_results.append((label, data_dict, async_result))
+        pending_results.append((label, async_result))
+        del data_dict  # free memory
+        gc.collect()
         print(f"[{idx+1}/{len(these_labels)}] Submitted training job for: {l_name}")
     # Collect remaining results
     print(f"\nWaiting for {len(pending_results)} remaining training jobs to complete...\n")

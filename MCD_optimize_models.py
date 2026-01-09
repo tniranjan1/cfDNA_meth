@@ -98,8 +98,6 @@ def objective(trial: optuna.Trial, train_dataset, val_dataset,
                    mode='triangular', monitor='val_loss', patience=8, factor=0.5, min_delta=0.99,
                    min_max_lr=1e-7, verbose=1)
     earlyStop = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=16)
-    log_file = f"trial_{trial.number}_metrics_log.csv"
-#    metrics_logger = MetricsLogger(log_file, trial_number=trial.number)
     model.compile(optimizer=optimizer, loss=loss, weighted_metrics = metrics, jit_compile=True)
     callbacks = [ earlyStop, clr ]
     # print summary of hyperparameters for this trial
@@ -130,7 +128,7 @@ def objective(trial: optuna.Trial, train_dataset, val_dataset,
 
 ##-----------------------------------------------------------------------------------------------##
 
-def study_training(training_data, validation_data,
+def study_training(Xtrn, Ytrn, Wtrn, Xval, Yval, Wval,
                    singleton=False, BATCH_SIZE=128) -> optuna.Study:
     """
     Conduct hyperparameter optimization study using Optuna.
@@ -144,9 +142,22 @@ def study_training(training_data, validation_data,
     Returns:
         optuna.Study: The completed Optuna study object containing optimization results.
     """
+    AUTOTUNE = tf.data.AUTOTUNE
+    train_dataset = tf.data.Dataset.from_tensor_slices((Xtrn, Ytrn, Wtrn))
+    train_dataset = train_dataset.cache()  # Cache in memory
+    train_dataset = train_dataset.shuffle(buffer_size=1000)
+    train_dataset = train_dataset.batch(BATCH_SIZE)
+    train_dataset = train_dataset.prefetch(AUTOTUNE)  # Prefetch batches
+    val_dataset = tf.data.Dataset.from_tensor_slices((Xval, Yval, Wval))
+    val_dataset = val_dataset.batch(BATCH_SIZE)
+    val_dataset = val_dataset.cache()
+    val_dataset = val_dataset.prefetch(AUTOTUNE)
+    del Xtrn, Ytrn, Wtrn, Xval, Yval, Wval  # free memory
+    gc.collect()
+    # Create and run Optuna study
     study = optuna.create_study(direction="maximize")
     study.optimize(lambda trial:
-                   objective(trial, training_data, validation_data, singleton, BATCH_SIZE), 
+                   objective(trial, train_dataset, val_dataset, singleton, BATCH_SIZE), 
                    n_trials=40, timeout=None)
     print("Best value:", study.best_value)
     print("Best params:", study.best_params)

@@ -374,16 +374,8 @@ def data_generator(current_label, beta_norm, combined_pheno_labels,
     unique, counts = np.unique(exp_valid_y, return_counts=True, axis=0)
     for u in range(len(unique)):
         print(f"Label {unique[u]}: {counts[u]} ({counts[u] / counts.sum() * 100:.2f}%)")
-    AUTOTUNE = tf.data.AUTOTUNE
-    train_dataset = tf.data.Dataset.from_tensor_slices((exp_train_x, exp_train_y, exp_train_w))
-    train_dataset = train_dataset.cache()  # Cache in memory
-    train_dataset = train_dataset.shuffle(buffer_size=1000)
-    train_dataset = train_dataset.batch(BATCH_SIZE)
-    train_dataset = train_dataset.prefetch(AUTOTUNE)  # Prefetch batches
-    val_dataset = tf.data.Dataset.from_tensor_slices((exp_valid_x, exp_valid_y, exp_valid_w))
-    val_dataset = val_dataset.batch(BATCH_SIZE)
-    val_dataset = val_dataset.cache()
-    val_dataset = val_dataset.prefetch(AUTOTUNE)
-    return { 'training_data': train_dataset, 'validation_data': val_dataset }
+    to_return = { 'Xtrn': exp_train_x, 'Ytrn': exp_train_y, 'Wtrn': exp_train_w,
+                  'Xval': exp_valid_x, 'Yval': exp_valid_y, 'Wval': exp_valid_w }
+    return to_return
 
 ##-----------------------------------------------------------------------------------------------##
