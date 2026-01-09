@@ -91,7 +91,7 @@ train_size = mdg.get_training_sizes()
 max_allowed, max_valid = mdg.get_allowed_sizes(these_labels, train_size, combined_pheno_labels,max_size=60)
 
 studies = {}
-BATCH_SIZE = 128
+BATCH_SIZE = 64
 ##-----------------------------------------------------------------------------------------------##
 
 from multiprocessing import Pool

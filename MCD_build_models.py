@@ -74,3 +74,30 @@ def build_meth_model(n_cpgs, n_classes, proj_dim=128, l1_proj=1e-5, l2_proj=1e-5
     return tf.keras.models.Model(inputs=inputs, outputs=outputs, name="meth_classifier")
 
 ##-----------------------------------------------------------------------------------------------##
+
+class CapacityCheckCallback(tf.keras.callbacks.Callback):
+    """
+    Stop if model is clearly underfitting (insufficient capacity).
+    """
+    model: tf.keras.Model
+    def __init__(self, patience=15, min_train_auc=0.65):
+        super().__init__()
+        self.patience = patience
+        self.min_train_auc = min_train_auc
+        self.epochs_below_threshold = 0
+    def on_epoch_end(self, epoch, logs=None):
+        if logs is None:
+            logs = {}
+        train_auc = logs.get('auc_pr', 0)
+        val_auc = logs.get('val_auc_pr', 0)
+        # Check if training AUC is stuck below minimum AND validation is much worse
+        if train_auc < self.min_train_auc and (train_auc - val_auc) > 0.15:
+            self.epochs_below_threshold += 1
+            if self.epochs_below_threshold >= self.patience:
+                print(f"Stopping: Model underfitting (train_auc={train_auc:.3f}, "
+                      f"val_auc={val_auc:.3f}). Insufficient model capacity.")
+                self.model.stop_training = True
+        else:
+            self.epochs_below_threshold = 0  # Reset counter
+
+##-----------------------------------------------------------------------------------------------##

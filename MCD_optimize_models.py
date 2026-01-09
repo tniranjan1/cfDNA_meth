@@ -6,7 +6,7 @@ import tensorflow as tf
 import numpy as np
 import optuna
 from CLR.clr_callback import CyclicLR
-from MCD_build_models import build_meth_model
+from MCD_build_models import CapacityCheckCallback, build_meth_model
 import gc
 
 # set tensorflow threading
@@ -97,9 +97,11 @@ def objective(trial: optuna.Trial, train_dataset, val_dataset,
     clr = CyclicLR(base_lr=1e-7, max_lr=start_lr, step_size=2*steps_per_epoch,
                    mode='triangular', monitor='val_loss', patience=8, factor=0.5, min_delta=0.99,
                    min_max_lr=1e-7, verbose=1)
-    earlyStop = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=16)
+    earlyStop = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=12)
+    pruning_callback = optuna.integration.TFKerasPruningCallback(trial, "val_auc_pr")
+    capacity_check = CapacityCheckCallback(patience=15, min_train_auc=0.65)
     model.compile(optimizer=optimizer, loss=loss, weighted_metrics = metrics, jit_compile=True)
-    callbacks = [ earlyStop, clr ]
+    callbacks = [ earlyStop, clr, pruning_callback, capacity_check ]
     # print summary of hyperparameters for this trial
     print(f"Trial {trial.number} hyperparameters:")
     for key, value in trial.params.items():
@@ -145,7 +147,7 @@ def study_training(Xtrn, Ytrn, Wtrn, Xval, Yval, Wval,
     AUTOTUNE = tf.data.AUTOTUNE
     train_dataset = tf.data.Dataset.from_tensor_slices((Xtrn, Ytrn, Wtrn))
     train_dataset = train_dataset.cache()  # Cache in memory
-    train_dataset = train_dataset.shuffle(buffer_size=1000)
+    train_dataset = train_dataset.shuffle(buffer_size=Xtrn.shape[0], reshuffle_each_iteration=True)
     train_dataset = train_dataset.batch(BATCH_SIZE)
     train_dataset = train_dataset.prefetch(AUTOTUNE)  # Prefetch batches
     val_dataset = tf.data.Dataset.from_tensor_slices((Xval, Yval, Wval))
@@ -155,7 +157,8 @@ def study_training(Xtrn, Ytrn, Wtrn, Xval, Yval, Wval,
     del Xtrn, Ytrn, Wtrn, Xval, Yval, Wval  # free memory
     gc.collect()
     # Create and run Optuna study
-    study = optuna.create_study(direction="maximize")
+    pruner = optuna.pruners.MedianPruner(n_warmup_steps=5)
+    study = optuna.create_study(direction="maximize", pruner=pruner)
     study.optimize(lambda trial:
                    objective(trial, train_dataset, val_dataset, singleton, BATCH_SIZE), 
                    n_trials=40, timeout=None)
