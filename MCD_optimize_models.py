@@ -5,6 +5,7 @@ os.environ['TF_XLA_FLAGS'] = "--tf_xla_auto_jit=2 --tf_xla_cpu_global_jit"
 import tensorflow as tf
 import numpy as np
 import optuna
+from optuna_integration.tfkeras import TFKerasPruningCallback
 from CLR.clr_callback import CyclicLR
 from MCD_build_models import CapacityCheckCallback, build_meth_model
 import gc
@@ -98,7 +99,7 @@ def objective(trial: optuna.Trial, train_dataset, val_dataset,
                    mode='triangular', monitor='val_loss', patience=8, factor=0.5, min_delta=0.99,
                    min_max_lr=1e-7, verbose=1)
     earlyStop = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=12)
-    pruning_callback = optuna.integration.TFKerasPruningCallback(trial, "val_auc_pr")
+    pruning_callback = TFKerasPruningCallback(trial, "val_auc_pr")
     capacity_check = CapacityCheckCallback(patience=15, min_train_auc=0.65)
     model.compile(optimizer=optimizer, loss=loss, weighted_metrics = metrics, jit_compile=True)
     callbacks = [ earlyStop, clr, pruning_callback, capacity_check ]
