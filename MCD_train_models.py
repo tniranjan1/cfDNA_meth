@@ -132,7 +132,7 @@ import time
 import gc
 
 # Loop through label combinations and train models in parallel (2-3 at a time)
-n_processes = 3  # Number of labels to train simultaneously
+n_processes = 6  # Number of labels to train simultaneously
 pending_results = []  # Queue to track pending async results (max n_processes)
 
 with Pool(processes=n_processes) as pool:
