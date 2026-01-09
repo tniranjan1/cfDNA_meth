@@ -286,6 +286,8 @@ def _init_worker(beta_norm, keep, combined_pheno_labels):
     _keep = keep
     _combined_pheno_labels = combined_pheno_labels
 
+##-----------------------------------------------------------------------------------------------##
+
 def _data_augmentor_wrapper(args):
     """
     Wrapper that uses global variables instead of passing large objects.
@@ -299,9 +301,13 @@ def _data_augmentor_wrapper(args):
     data_vec, dup_size = args
     return data_augmentor(data_vec, _beta_norm, _keep, _combined_pheno_labels, dup_size)
 
-# build model function
+##-----------------------------------------------------------------------------------------------##
+
+import tensorflow as tf
+nf16 = np.float16
+
 def data_generator(current_label, beta_norm, combined_pheno_labels,
-                   keep, max_allowed, max_valid, these_labels) -> dict:
+                   keep, max_allowed, max_valid, these_labels, BATCH_SIZE) -> dict:
     """
     Data generator function for training methylation classification model.
 
@@ -313,9 +319,10 @@ def data_generator(current_label, beta_norm, combined_pheno_labels,
         max_allowed (pd.Series): Series of maximum allowed training sizes for each label
         max_valid (pd.Series): Series of maximum allowed validation sizes for each label
         these_labels (list): List of all label combinations
+        BATCH_SIZE (int): Batch size for training
     
     Returns:
-        dict: Dictionary containing training and validation data, labels, and weights
+        dict: Dictionary containing training and validation datasets
     """
     label_df = combined_pheno_labels
     main_label = label_df[current_label]
@@ -348,31 +355,35 @@ def data_generator(current_label, beta_norm, combined_pheno_labels,
         d = 4 # duplication factor for augmentation
         # Augment training data
         items = tqdm([ (train_x[s,:], d) for s in range(len(train_x))], desc="Augment training")
-        expanded_train_x = np.vstack(pool.map(_data_augmentor_wrapper, items, chunksize=1))
-        expanded_train_y = np.vstack([ np.tile(train_y[s,:], (5*d,1)) for s in range(len(train_y)) ])
-        expanded_train_w = np.hstack([ np.tile(train_w[s], 5*d) for s in range(len(train_w)) ])
+        exp_train_x = np.vstack(pool.map(_data_augmentor_wrapper, items, chunksize=1)).astype(nf16)
+        exp_train_y = np.vstack([ np.tile(train_y[s,:], (5*d,1)) for s in range(len(train_y)) ]).astype(nf16)
+        exp_train_w = np.hstack([ np.tile(train_w[s], 5*d) for s in range(len(train_w)) ]).astype(nf16)
         # Augment validation data
         items = tqdm([ (valid_x[s,:], d) for s in range(len(valid_x))], desc="Augment validation")
-        expanded_valid_x = np.vstack(pool.map(_data_augmentor_wrapper, items, chunksize=1))
-        expanded_valid_y = np.vstack([ np.tile(valid_y[s,:], (5*d,1)) for s in range(len(valid_y)) ])
-        expanded_valid_w = np.hstack([ np.tile(valid_w[s], 5*d) for s in range(len(valid_w)) ])
+        exp_valid_x = np.vstack(pool.map(_data_augmentor_wrapper, items, chunksize=1)).astype(nf16)
+        exp_valid_y = np.vstack([ np.tile(valid_y[s,:], (5*d,1)) for s in range(len(valid_y)) ]).astype(nf16)
+        exp_valid_w = np.hstack([ np.tile(valid_w[s], 5*d) for s in range(len(valid_w)) ]).astype(nf16)
     # print a comparison between the sample label distributions between
-    #   expanded_train_y and expanded_valid_y
+    #   exp_train_y and exp_valid_y
     print(current_label)
     print("Training label distribution:")
-    unique, counts = np.unique(expanded_train_y, return_counts=True, axis=0)
+    unique, counts = np.unique(exp_train_y, return_counts=True, axis=0)
     for u in range(len(unique)):
         print(f"Label {unique[u]}: {counts[u]} ({counts[u] / counts.sum() * 100:.2f}%)")
     print("Validation label distribution:")
-    unique, counts = np.unique(expanded_valid_y, return_counts=True, axis=0)
+    unique, counts = np.unique(exp_valid_y, return_counts=True, axis=0)
     for u in range(len(unique)):
         print(f"Label {unique[u]}: {counts[u]} ({counts[u] / counts.sum() * 100:.2f}%)")
-    to_return = { 'Xtrn': expanded_train_x,
-                  'Ytrn': expanded_train_y,
-                  'Wtrn': expanded_train_w,
-                  'Xval': expanded_valid_x,
-                  'Yval': expanded_valid_y,
-                  'Wval': expanded_valid_w }
-    return to_return
+    AUTOTUNE = tf.data.AUTOTUNE
+    train_dataset = tf.data.Dataset.from_tensor_slices((exp_train_x, exp_train_y, exp_train_w))
+    train_dataset = train_dataset.cache()  # Cache in memory
+    train_dataset = train_dataset.shuffle(buffer_size=1000)
+    train_dataset = train_dataset.batch(BATCH_SIZE)
+    train_dataset = train_dataset.prefetch(AUTOTUNE)  # Prefetch batches
+    val_dataset = tf.data.Dataset.from_tensor_slices((exp_valid_x, exp_valid_y, exp_valid_w))
+    val_dataset = val_dataset.batch(BATCH_SIZE)
+    val_dataset = val_dataset.cache()
+    val_dataset = val_dataset.prefetch(AUTOTUNE)
+    return { 'train': train_dataset, 'val': val_dataset }
 
 ##-----------------------------------------------------------------------------------------------##

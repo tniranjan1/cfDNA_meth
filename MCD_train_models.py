@@ -28,6 +28,7 @@ else:
     # store beta_norm for later use
     with open(work_dir + "/beta_norm.pkl", "wb") as f:
         pickle.dump(beta_norm, f)
+
 # convert beta_norm to float16 to save memory
 beta_norm = beta_norm.astype('float16')
 
@@ -90,26 +91,99 @@ train_size = mdg.get_training_sizes()
 max_allowed, max_valid = mdg.get_allowed_sizes(these_labels, train_size, combined_pheno_labels,max_size=60)
 
 studies = {}
-for label in these_labels:
+BATCH_SIZE = 128
+##-----------------------------------------------------------------------------------------------##
+
+from multiprocessing import Pool
+
+# Global variables for worker processes
+_beta_norm = None
+_combined_pheno_labels = None
+_keep = None
+_max_allowed = None
+_max_valid = None
+_these_labels = None
+_BATCH_SIZE = None
+_work_dir = ''
+
+def _init_worker(beta_norm, combined_pheno_labels, keep, max_allowed, max_valid,
+                 these_labels, BATCH_SIZE, work_dir):
+    """
+    Initializer function for worker processes.
+    
+    Called once per worker process to load large data objects into the
+    process's memory space. This avoids pickling these objects for each task.
+    """
+    global _beta_norm, _combined_pheno_labels, _keep, _max_allowed, _max_valid
+    global _these_labels, _BATCH_SIZE, _work_dir
+    
+    _beta_norm = beta_norm
+    _combined_pheno_labels = combined_pheno_labels
+    _keep = keep
+    _max_allowed = max_allowed
+    _max_valid = max_valid
+    _these_labels = these_labels
+    _BATCH_SIZE = BATCH_SIZE
+    _work_dir = work_dir
+
+def _train_label_study(label) -> tuple:
+    """
+    Worker function to train a single label's study in a separate process.
+    
+    Uses global variables initialized by _init_worker() to avoid pickling
+    large data objects for each task.
+    
+    Args:
+        label: The label combination to train
+    
+    Returns:
+        tuple: (label, study_result)
+    """
     l_name = '_'.join(label)
     current_data_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    f_out = work_dir + f"/model_training/study_{l_name}.{current_data_time}.log"
-    # make parent dir if it doesn't exist
+    f_out = _work_dir + f"/model_training/study_{l_name}.{current_data_time}.log"
+    # Make parent dir if it doesn't exist
     os.makedirs(os.path.dirname(f_out), exist_ok=True)
     # Save original stdout
     original_stdout = sys.stdout
     try:
-        # re-direct all stdout to log file
+        # Redirect all stdout to log file
         with open(f_out, "a") as f:
             sys.stdout = f
             print(f"Starting training study for label combo: {l_name}")
-            # generate data dict for this label combo
-            data_dict = mdg.data_generator(label, beta_norm, combined_pheno_labels,
-                                           keep, max_allowed, max_valid, these_labels)
-            data_dict['singleton'] = True # simulate single-read sampling
-            studies[label] = study_training(**data_dict)
+            
+            # Generate data dict for this label combo (sequential within worker)
+            data_dict = mdg.data_generator(label, _beta_norm, _combined_pheno_labels, _keep,
+                                           _max_allowed, _max_valid, _these_labels, _BATCH_SIZE)
+            data_dict['singleton'] = True  # simulate single-read sampling
+            data_dict['BATCH_SIZE'] = _BATCH_SIZE
+            
+            # Train study and return result
+            study_result = study_training(**data_dict)
+            print(f"Completed training study for label combo: {l_name}")
+            
+            return label, study_result
     finally:
         # Restore original stdout
         sys.stdout = original_stdout
+
+##-----------------------------------------------------------------------------------------------##
+
+# Loop through label combinations and train models in parallel (2-3 at a time)
+n_processes = 3  # Number of labels to train simultaneously
+with Pool(processes=n_processes, initializer=_init_worker,
+          initargs=(beta_norm, combined_pheno_labels, keep, max_allowed, max_valid,
+                   these_labels, BATCH_SIZE, work_dir)) as pool:
+    
+    # Map the training function across all labels and collect results
+    # Only the label is passed for each task, large objects are loaded once per worker
+    results = pool.map(_train_label_study, these_labels)
+    
+
+    # Store results in studies dictionary
+    for label, study_result in results:
+        studies[label] = study_result
+
+print(f"Completed training for all {len(these_labels)} label combinations")
 
 ##-----------------------------------------------------------------------------------------------##

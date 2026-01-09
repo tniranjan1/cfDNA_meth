@@ -7,16 +7,18 @@ import numpy as np
 import optuna
 from CLR.clr_callback import CyclicLR
 from MCD_build_models import build_meth_model
+import gc
 
 # set tensorflow threading
 tf.function(jit_compile=True)
 tf.config.optimizer.set_jit(True)
-tf.config.threading.set_intra_op_parallelism_threads(80)  # Parallel ops within layers
-tf.config.threading.set_inter_op_parallelism_threads(80)  # Parallel independent ops
+tf.config.threading.set_intra_op_parallelism_threads(10)  # Parallel ops within layers
+tf.config.threading.set_inter_op_parallelism_threads(10)  # Parallel independent ops
 
 ##-----------------------------------------------------------------------------------------------##
 
-def objective(trial: optuna.Trial, Xtrn, Ytrn, Wtrn, Xval, Yval, Wval, singleton=False) -> float:
+def objective(trial: optuna.Trial, train_dataset, val_dataset,
+              singleton=False, BATCH_SIZE=128) -> float:
     """
     Objective function for Optuna hyperparameter optimization of a methylation classification model.
 
@@ -40,13 +42,10 @@ def objective(trial: optuna.Trial, Xtrn, Ytrn, Wtrn, Xval, Yval, Wval, singleton
 
     Args:
         trial (optuna.Trial): An Optuna trial object used to suggest hyperparameter values.
-        Xtrn (np.ndarray): Training feature matrix
-        Ytrn (np.ndarray): Training label matrix
-        Wtrn (np.ndarray): Training sample weights
-        Xval (np.ndarray): Validation feature matrix
-        Yval (np.ndarray): Validation label matrix
-        Wval (np.ndarray): Validation sample weights
+        train_dataset (tf.data.Dataset): Training dataset
+        val_dataset (tf.data.Dataset): Validation dataset
         singleton (bool): Whether to use singleton mode (affects data augmentation)
+        BATCH_SIZE (int): Batch size for training
 
     Returns:
         float: The validation PR AUC score (or negative validation loss as fallback) to be
@@ -61,7 +60,7 @@ def objective(trial: optuna.Trial, Xtrn, Ytrn, Wtrn, Xval, Yval, Wval, singleton
     tf.random.set_seed(seed)
     np.random.seed(seed)
     # Search space
-    proj_dim     = trial.suggest_categorical("proj_dim", [32, 64, 128, 256, 512])
+    proj_dim     = trial.suggest_categorical("proj_dim", [32, 64, 128, 256, 512, 1024])
     l1_proj      = trial.suggest_float("l1_proj", 1e-6, 1e-2, log=True)
     l2_proj      = trial.suggest_float("l2_proj", 1e-6, 1e-2, log=True)
     l2_hidden    = trial.suggest_float("l2_hidden", 1e-6, 1e-2, log=True)
@@ -74,9 +73,8 @@ def objective(trial: optuna.Trial, Xtrn, Ytrn, Wtrn, Xval, Yval, Wval, singleton
     start_lr     = trial.suggest_float("lr", 1e-6, 1e-3, log=True)
     label_smooth = trial.suggest_float("label_smoothing", 0.0, 0.05)
     # Define loss and final activation functions
-    n_cpgs = Xtrn.shape[1]
-    n_classes = Ytrn.shape[1]
-    n_train_samples = Xtrn.shape[0]
+    n_cpgs = train_dataset.element_spec[0].shape[1]
+    n_classes = train_dataset.element_spec[1].shape[1]
     if n_classes == 1:
         loss = tf.keras.losses.BinaryCrossentropy(from_logits=False)
         out_activation = 'sigmoid'
@@ -94,28 +92,16 @@ def objective(trial: optuna.Trial, Xtrn, Ytrn, Wtrn, Xval, Yval, Wval, singleton
                 tf.keras.metrics.AUC(curve="PR", multi_label=False, name="auc_pr"),
                 tf.keras.metrics.Precision(name="precision"), 
                 tf.keras.metrics.Recall(name="recall") ]
-    BATCH_SIZE = 128
-    steps_per_epoch = n_train_samples // BATCH_SIZE
+    steps_per_epoch = tf.data.experimental.cardinality(train_dataset).numpy()
     optimizer = tf.keras.optimizers.Adam(learning_rate=start_lr)
     clr = CyclicLR(base_lr=1e-7, max_lr=start_lr, step_size=2*steps_per_epoch,
                    mode='triangular', monitor='val_loss', patience=8, factor=0.5, min_delta=0.99,
                    min_max_lr=1e-7, verbose=1)
-    earlyStop = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=20)
+    earlyStop = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=16)
     log_file = f"trial_{trial.number}_metrics_log.csv"
 #    metrics_logger = MetricsLogger(log_file, trial_number=trial.number)
     model.compile(optimizer=optimizer, loss=loss, weighted_metrics = metrics, jit_compile=True)
     callbacks = [ earlyStop, clr ]
-    # Convert to tf.data.Dataset for optimized pipeline
-    AUTOTUNE = tf.data.AUTOTUNE
-    train_dataset = tf.data.Dataset.from_tensor_slices((Xtrn, Ytrn, Wtrn))
-    train_dataset = train_dataset.cache()  # Cache in memory
-    train_dataset = train_dataset.shuffle(buffer_size=1000)
-    train_dataset = train_dataset.batch(BATCH_SIZE)
-    train_dataset = train_dataset.prefetch(AUTOTUNE)  # Prefetch batches
-    val_dataset = tf.data.Dataset.from_tensor_slices((Xval, Yval, Wval))
-    val_dataset = val_dataset.batch(BATCH_SIZE)
-    val_dataset = val_dataset.cache()
-    val_dataset = val_dataset.prefetch(AUTOTUNE)
     # print summary of hyperparameters for this trial
     print(f"Trial {trial.number} hyperparameters:")
     for key, value in trial.params.items():
@@ -129,8 +115,8 @@ def objective(trial: optuna.Trial, Xtrn, Ytrn, Wtrn, Xval, Yval, Wval, singleton
                         shuffle=True,
                         callbacks=callbacks,
                         use_multiprocessing=True,
-                        workers=os.cpu_count() or 80,
-                        max_queue_size=os.cpu_count() or 80)
+                        workers=10,
+                        max_queue_size=10)
     # Optimize for validation PR AUC if available; fallback to ROC AUC and then val_loss
     if history is None:
         return 0.0
@@ -144,25 +130,23 @@ def objective(trial: optuna.Trial, Xtrn, Ytrn, Wtrn, Xval, Yval, Wval, singleton
 
 ##-----------------------------------------------------------------------------------------------##
 
-def study_training(Xtrn, Ytrn, Wtrn, Xval, Yval, Wval, singleton=False) -> optuna.Study:
+def study_training(training_data, validation_data,
+                   singleton=False, BATCH_SIZE=128) -> optuna.Study:
     """
     Conduct hyperparameter optimization study using Optuna.
 
     Args:
-        Xtrn (np.ndarray): Training feature matrix
-        Ytrn (np.ndarray): Training label matrix
-        Wtrn (np.ndarray): Training sample weights
-        Xval (np.ndarray): Validation feature matrix
-        Yval (np.ndarray): Validation label matrix
-        Wval (np.ndarray): Validation sample weights
+        training_data (tf.data.Dataset): Training dataset
+        validation_data (tf.data.Dataset): Validation dataset
         singleton (bool): Whether to use singleton mode (affects data augmentation)
+        BATCH_SIZE (int): Batch size for training
 
     Returns:
         optuna.Study: The completed Optuna study object containing optimization results.
     """
     study = optuna.create_study(direction="maximize")
     study.optimize(lambda trial:
-                   objective(trial, Xtrn, Ytrn, Wtrn, Xval, Yval, Wval, singleton), 
+                   objective(trial, training_data, validation_data, singleton, BATCH_SIZE), 
                    n_trials=40, timeout=None)
     print("Best value:", study.best_value)
     print("Best params:", study.best_params)
