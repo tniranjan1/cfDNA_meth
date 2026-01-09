@@ -112,7 +112,7 @@ def _init_worker(training_data_dict, work_dir):
     _training_data_dict = training_data_dict
     _work_dir = work_dir
 
-def _train_label_study(label, data_dict) -> tuple:
+def _train_label_study(label, data_dict, f_out) -> tuple:
     """
     Worker function to train a single label's study in a separate process.
     
@@ -127,7 +127,6 @@ def _train_label_study(label, data_dict) -> tuple:
         tuple: (label, study_result)
     """
     l_name = '_'.join(label)
-    f_out = data_dict['log_file']
     # Save original stdout
     original_stdout = sys.stdout
     try:
@@ -191,12 +190,11 @@ with Pool(processes=n_processes) as pool:
                                                max_allowed, max_valid, these_labels, BATCH_SIZE)
                 data_dict['BATCH_SIZE'] = BATCH_SIZE
                 data_dict['singleton'] = True  # simulate single-read sampling
-                data_dict['log_file'] = f_out
                 print("Data generation complete. Submitting to training pool...\n")
         finally:
             sys.stdout = original_stdout
         # Submit job and add to pending queue
-        async_result = pool.apply_async(_train_label_study, (label, data_dict))
+        async_result = pool.apply_async(_train_label_study, (label, data_dict, f_out))
         pending_results.append((label, data_dict, async_result))
         print(f"[{idx+1}/{len(these_labels)}] Submitted training job for: {l_name}")
     # Collect remaining results

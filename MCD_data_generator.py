@@ -384,6 +384,6 @@ def data_generator(current_label, beta_norm, combined_pheno_labels,
     val_dataset = val_dataset.batch(BATCH_SIZE)
     val_dataset = val_dataset.cache()
     val_dataset = val_dataset.prefetch(AUTOTUNE)
-    return { 'train': train_dataset, 'val': val_dataset }
+    return { 'training_data': train_dataset, 'validation_data': val_dataset }
 
 ##-----------------------------------------------------------------------------------------------##
