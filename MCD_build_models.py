@@ -23,7 +23,8 @@ def binarization_layer(x: tf.Tensor) -> tf.Tensor:
 def build_meth_model(n_cpgs, n_classes, proj_dim=128, l1_proj=1e-5, l2_proj=1e-5,
                      l2_hidden=1e-4, noise_std=0.01, dropout_proj=0.4, dropout_h1=0.3,
                      dropout_h2=0.2, use_hidden1=True, use_hidden2=False,
-                     out_activation="softmax", singleton=False) -> tf.keras.Model:
+                     out_activation="softmax", singleton=False,
+                     use_fraction_input=False) -> tf.keras.Model:
     """
     Build a methylation-based classifier model.
 
@@ -42,6 +43,8 @@ def build_meth_model(n_cpgs, n_classes, proj_dim=128, l1_proj=1e-5, l2_proj=1e-5
         use_hidden2 (bool): Whether to include a second hidden layer (optuna hyperparameter)
         out_activation (str): Activation function for output layer
         singleton (bool): Whether to use singleton mode (affects input binarization)
+        use_fraction_input (bool): Whether to include spike-in fraction as auxiliary input.
+            This helps the model learn fraction-specific patterns.
 
     Returns:
         tf.keras.Model: Compiled Keras model
@@ -58,6 +61,14 @@ def build_meth_model(n_cpgs, n_classes, proj_dim=128, l1_proj=1e-5, l2_proj=1e-5
     x = layers.BatchNormalization(name="projection_batchnorm")(x)
     x = layers.Activation("relu", name="projection_relu")(x)
     x = layers.Dropout(dropout_proj, name="projection_dropout")(x)
+    
+    # Optionally concatenate spike-in fraction as auxiliary input
+    if use_fraction_input:
+        fraction_input = layers.Input(shape=(1,), dtype='float32', name="fraction_input")
+        # Scale fraction to similar magnitude as other features
+        fraction_scaled = layers.Dense(8, activation="relu", name="fraction_embed")(fraction_input)
+        x = layers.Concatenate(name="concat_fraction")([x, fraction_scaled])
+    
     if use_hidden1:
         x = layers.Dense(proj_dim // 4, activation="relu",
             kernel_regularizer=keras.regularizers.l2(l2_hidden),
@@ -71,6 +82,10 @@ def build_meth_model(n_cpgs, n_classes, proj_dim=128, l1_proj=1e-5, l2_proj=1e-5
             x = layers.Dropout(dropout_h2, name="hidden_dropout_2")(x)
     outputs = layers.Dense(n_classes, activation=out_activation,
                            dtype='float32', name="output")(x)
+    
+    if use_fraction_input:
+        return tf.keras.models.Model(inputs=[inputs, fraction_input], outputs=outputs,  # type: ignore[possibly-unbound]
+                                     name="meth_classifier_with_fraction")
     return tf.keras.models.Model(inputs=inputs, outputs=outputs, name="meth_classifier")
 
 ##-----------------------------------------------------------------------------------------------##

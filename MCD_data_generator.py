@@ -235,13 +235,20 @@ def data_augmentor(data_vec, beta_norm, keep, combined_pheno_labels,
 
 ##-----------------------------------------------------------------------------------------------##
 
-def build_sample_weights(main_label, sample_index) -> np.ndarray:
+def build_sample_weights(main_label, sample_index, fractions=None, 
+                         fraction_weight_power=1.0) -> np.ndarray:
     """
-    Build sample weights for training/validation samples based on class distribution.
+    Build sample weights for training/validation samples based on class distribution
+    and optionally spike-in fractions.
 
     Args:
         main_label (pd.DataFrame): DataFrame of main labels for classification
         sample_index (pd.Index): Index of training/validation sample names
+        fractions (np.ndarray, optional): Spike-in fractions for each sample.
+            If provided, samples with lower fractions receive higher weights.
+        fraction_weight_power (float): Power to raise inverse fraction weights.
+            Higher values = more emphasis on low-fraction samples.
+            0.0 = no fraction weighting, 1.0 = linear, 2.0 = quadratic
 
     Returns:
         np.ndarray: Array of sample weights
@@ -260,7 +267,15 @@ def build_sample_weights(main_label, sample_index) -> np.ndarray:
         weight = label_weights[matching_index]
         sample_w_weights.append(weight)
     sample_w = np.array(sample_w_weights)
-    return sample_w
+    # Apply fraction-based weighting if fractions are provided
+    if fractions is not None and fraction_weight_power > 0:
+        # Weight inversely proportional to fraction (lower fraction = higher weight)
+        # Add small epsilon to avoid division by zero
+        fraction_weights = (1.0 / (fractions + 1e-6)) ** fraction_weight_power
+        # Normalize fraction weights to have mean 1 (preserve overall weight scale)
+        fraction_weights = fraction_weights / fraction_weights.mean()
+        sample_w = sample_w * fraction_weights
+    return sample_w.astype(np.float16)
 
 ##-----------------------------------------------------------------------------------------------##
 
@@ -345,14 +360,10 @@ def data_generator(current_label, beta_norm, combined_pheno_labels,
     train_x = np.array(beta_norm.loc[train_index,keep > 0])
     # build matching training labels array
     train_y = np.array(main_label.loc[train_index])
-    # build class adjusted weights for training samples
-    train_w = build_sample_weights(main_label, train_index)
     # build unaugmented validation data array
     valid_x = np.array(beta_norm.loc[valid_index,keep > 0])
     # build matching validation labels array
     valid_y = np.array(label_df[current_label].loc[valid_index])
-    # build class adjusted weights for validation samples
-    valid_w = build_sample_weights(main_label, valid_index)
     with Pool(processes=24, initializer=_init_worker,
               initargs=(beta_norm, keep, combined_pheno_labels)) as pool:
         d = 4 # duplication factor for augmentation
@@ -363,14 +374,19 @@ def data_generator(current_label, beta_norm, combined_pheno_labels,
         exp_train_x = np.vstack(exp_train_x).astype(nf16)
         exp_train_t = np.hstack(exp_train_t).astype(nf16)
         exp_train_y = np.vstack([ np.tile(train_y[s,:], (5*d,1)) for s in range(len(train_y)) ]).astype(nf16)
-        exp_train_w = np.hstack([ np.tile(train_w[s], 5*d) for s in range(len(train_w)) ]).astype(nf16)
+        # Build weights with fraction-based adjustment (emphasize low-fraction samples)
+        # Adjust this: 0=off, 1=linear, 2=quadratic
+        exp_train_w = build_sample_weights(main_label, pd.Index(np.repeat(train_index, 5*d)),
+                                           fractions=exp_train_t, fraction_weight_power=1.0)
         # Augment validation data
         items = tqdm([ (valid_x[s,:], d) for s in range(len(valid_x))], desc="Augment validation")
         exp_valid_x, exp_valid_t = zip(*pool.map(_data_augmentor_wrapper, items, chunksize=1))
         exp_valid_x = np.vstack(exp_valid_x).astype(nf16)
         exp_valid_t = np.hstack(exp_valid_t).astype(nf16)
         exp_valid_y = np.vstack([ np.tile(valid_y[s,:], (5*d,1)) for s in range(len(valid_y)) ]).astype(nf16)
-        exp_valid_w = np.hstack([ np.tile(valid_w[s], 5*d) for s in range(len(valid_w)) ]).astype(nf16)
+        # Validation weights also fraction-adjusted for consistent evaluation
+        exp_valid_w = build_sample_weights(main_label, pd.Index(np.repeat(valid_index, 5*d)),
+                                           fractions=exp_valid_t, fraction_weight_power=1.0)
     # print a comparison between the sample label distributions between
     #   exp_train_y and exp_valid_y
     print(current_label)

@@ -77,7 +77,7 @@ class FractionAUCPRCallback(tf.keras.callbacks.Callback):
         T_val (np.ndarray): Validation spike-in fractions
         verbose (int): Verbosity level (0=silent, 1=print per-fraction metrics)
     """
-    def __init__(self, X_train, Y_train, T_train, X_val, Y_val, T_val, verbose=1):
+    def __init__(self, X_train, Y_train, T_train, X_val, Y_val, T_val, verbose=0):
         super().__init__()
         self.X_train = X_train
         self.Y_train = Y_train
@@ -211,8 +211,7 @@ def objective(trial: optuna.Trial, train_dataset, Ttrn, val_dataset,
     model.compile(optimizer=optimizer, loss=loss, weighted_metrics = metrics, jit_compile=True)
     # Create callback for per-fraction AUC-PR computation after each epoch
     fraction_auc_callback = FractionAUCPRCallback(X_train=Xtrn_raw, Y_train=Ytrn_raw, T_train=Ttrn,
-                                                  X_val=Xval_raw, Y_val=Yval_raw, T_val=Tval,
-                                                  verbose=1)
+                                                  X_val=Xval_raw, Y_val=Yval_raw, T_val=Tval, verbose=1)
     callbacks = [ earlyStop, clr, pruning_callback, capacity_check, fraction_auc_callback ]
     # print summary of hyperparameters for this trial
     print(f"Trial {trial.number} hyperparameters:")
