@@ -61,7 +61,7 @@ def objective(trial: optuna.Trial, train_dataset, val_dataset,
     tf.random.set_seed(seed)
     np.random.seed(seed)
     # Search space
-    proj_dim     = trial.suggest_categorical("proj_dim", [32, 64, 128, 256, 512, 1024])
+    proj_dim     = trial.suggest_categorical("proj_dim", [16, 32, 64, 128, 256, 512])
     l1_proj      = trial.suggest_float("l1_proj", 1e-6, 1e-2, log=True)
     l2_proj      = trial.suggest_float("l2_proj", 1e-6, 1e-2, log=True)
     l2_hidden    = trial.suggest_float("l2_hidden", 1e-6, 1e-2, log=True)

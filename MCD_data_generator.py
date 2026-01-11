@@ -12,7 +12,7 @@ def construct_label_combos() -> list:
     mcd_other = [ 'HME', 'MOGHE', 'PMG', 'TSC', 'mMCD' ]
     ms_subtypes = [ 'Demy_MS_Hipp', 'My_MS_Hipp', 'MS' ]
     labels = []
-    labels.append(ctrls + fcd_subtypes + mcd_other + ms_subtypes + ['TLE', 'leukocyte'])
+#    labels.append(ctrls + fcd_subtypes + mcd_other + ms_subtypes + ['TLE', 'leukocyte'])
     labels.append([ 'Ctrl', 'Disease' ])
     labels.append([ 'Ctrl' ])
     labels.append([ 'Disease' ])
