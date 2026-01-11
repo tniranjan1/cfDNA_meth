@@ -203,7 +203,7 @@ def data_augmentor(data_vec, beta_norm, keep, combined_pheno_labels,
     """
     Augmentation generator that yields batches of data with leukocyte spike-in augmentation.
   
-    For each sample, randomly selects a spike-in fraction (0.5, 0.25, 0.125, 0.05, 0.025),
+    For each sample, randomly selects a spike-in fraction (0.5, 0.25, 0.125, 0.0625, 0.03125),
     finds a leukocyte sample, mixes it with the current sample, and converts to binary.
     
     Args:
@@ -221,7 +221,7 @@ def data_augmentor(data_vec, beta_norm, keep, combined_pheno_labels,
     batch_t = []
     for _ in range(dup_size):
         # spike-in fraction
-        for s in [0.5, 0.25, 0.125, 0.05, 0.025]:
+        for s in [0.5, 0.25, 0.125, 0.0625, 0.03125]:
             # Random leukocyte sample
             i = np.random.choice(leukocyte_indices)
             # Get data vectors
