@@ -6,6 +6,7 @@ import tensorflow as tf
 import numpy as np
 import optuna
 from optuna_integration.tfkeras import TFKerasPruningCallback
+from sklearn.metrics import average_precision_score
 from CLR.clr_callback import CyclicLR
 from MCD_build_models import CapacityCheckCallback, build_meth_model
 import gc
@@ -18,7 +19,106 @@ tf.config.threading.set_inter_op_parallelism_threads(10)  # Parallel independent
 
 ##-----------------------------------------------------------------------------------------------##
 
-def objective(trial: optuna.Trial, train_dataset, val_dataset,
+def compute_auc_pr_per_fraction(y_true, y_pred, fractions):
+    """
+    Compute AUC-PR for each unique spike-in fraction.
+    
+    Args:
+        y_true (np.ndarray): True labels (one-hot encoded or binary)
+        y_pred (np.ndarray): Predicted probabilities
+        fractions (np.ndarray): Spike-in fractions for each sample
+        
+    Returns:
+        dict: Dictionary mapping each unique fraction to its AUC-PR score
+    """
+    unique_fractions = np.unique(fractions)
+    auc_pr_per_fraction = {}
+    for frac in unique_fractions:
+        mask = fractions == frac
+        if np.sum(mask) < 2:  # Need at least 2 samples
+            continue
+        y_true_frac = y_true[mask]
+        y_pred_frac = y_pred[mask]
+        # Handle one-hot encoded labels
+        if len(y_true_frac.shape) > 1 and y_true_frac.shape[1] > 1:
+            # For multi-class, compute macro-averaged AUC-PR
+            auc_pr = 0.0
+            n_classes = y_true_frac.shape[1]
+            for c in range(n_classes):
+                if len(np.unique(y_true_frac[:, c])) > 1:  # Need both classes
+                    auc_pr += average_precision_score(y_true_frac[:, c], y_pred_frac[:, c])
+            auc_pr /= n_classes
+        else:
+            # Binary classification
+            y_true_flat = y_true_frac.ravel() if len(y_true_frac.shape) > 1 else y_true_frac
+            y_pred_flat = y_pred_frac.ravel() if len(y_pred_frac.shape) > 1 else y_pred_frac
+            if len(np.unique(y_true_flat)) > 1:  # Need both classes
+                auc_pr = average_precision_score(y_true_flat, y_pred_flat)
+            else:
+                continue
+        auc_pr_per_fraction[float(frac)] = auc_pr
+    return auc_pr_per_fraction
+
+##-----------------------------------------------------------------------------------------------##
+
+class FractionAUCPRCallback(tf.keras.callbacks.Callback):
+    """
+    Keras callback to compute and log AUC-PR per spike-in fraction after each epoch.
+    
+    This callback computes AUC-PR for each unique spike-in fraction in both training
+    and validation sets at the end of each epoch, logging them to the training history.
+    
+    Args:
+        X_train (np.ndarray): Training features
+        Y_train (np.ndarray): Training labels
+        T_train (np.ndarray): Training spike-in fractions
+        X_val (np.ndarray): Validation features
+        Y_val (np.ndarray): Validation labels
+        T_val (np.ndarray): Validation spike-in fractions
+        verbose (int): Verbosity level (0=silent, 1=print per-fraction metrics)
+    """
+    def __init__(self, X_train, Y_train, T_train, X_val, Y_val, T_val, verbose=1):
+        super().__init__()
+        self.X_train = X_train
+        self.Y_train = Y_train
+        self.T_train = T_train
+        self.X_val = X_val
+        self.Y_val = Y_val
+        self.T_val = T_val
+        self.verbose = verbose
+        # Get unique fractions for metric names
+        self.train_fractions = np.unique(T_train)
+        self.val_fractions = np.unique(T_val)
+    def on_epoch_end(self, epoch, logs=None):
+        logs = logs or {}
+        # Compute training AUC-PR per fraction
+        y_pred_train = self.model.predict(self.X_train, verbose=0)  # type: ignore[union-attr]
+        train_auc_pr = compute_auc_pr_per_fraction(self.Y_train, y_pred_train, self.T_train)
+        # Compute validation AUC-PR per fraction
+        y_pred_val = self.model.predict(self.X_val, verbose=0)  # type: ignore[union-attr]
+        val_auc_pr = compute_auc_pr_per_fraction(self.Y_val, y_pred_val, self.T_val)
+        # Log training metrics
+        for frac, auc_pr in train_auc_pr.items():
+            metric_name = f"auc_pr_frac_{frac:.4f}"
+            logs[metric_name] = auc_pr
+        # Log validation metrics
+        for frac, auc_pr in val_auc_pr.items():
+            metric_name = f"val_auc_pr_frac_{frac:.4f}"
+            logs[metric_name] = auc_pr
+        # Optionally print per-fraction AUC-PR
+        if self.verbose > 0:
+            print(f"\n  Epoch {epoch + 1} - AUC-PR per spike-in fraction:")
+            print("    Training:")
+            for frac, auc_pr in sorted(train_auc_pr.items()):
+                print(f"      Frac {frac:.4f}: {auc_pr:.4f}")
+            print("    Validation:")
+            for frac, auc_pr in sorted(val_auc_pr.items()):
+                print(f"      Frac {frac:.4f}: {auc_pr:.4f}")
+
+##-----------------------------------------------------------------------------------------------##
+
+def objective(trial: optuna.Trial, train_dataset, Ttrn, val_dataset,
+              Tval, Xtrn_raw, Ytrn_raw, Xval_raw, Yval_raw, 
               singleton=False, BATCH_SIZE=128) -> float:
     """
     Objective function for Optuna hyperparameter optimization of a methylation classification model.
@@ -39,12 +139,19 @@ def objective(trial: optuna.Trial, train_dataset, val_dataset,
         - label_smooth: label smoothing coefficient for loss function
     3. Builds and compiles a methylation classification model with suggested hyperparameters
     4. Trains the model with early stopping and learning rate reduction callbacks
-    5. Returns the maximum validation PR AUC score for maximization
+    5. Computes and logs AUC-PR for each spike-in fraction after each epoch
+    6. Returns the maximum validation PR AUC score for maximization
 
     Args:
         trial (optuna.Trial): An Optuna trial object used to suggest hyperparameter values.
         train_dataset (tf.data.Dataset): Training dataset
+        Ttrn (np.ndarray): Training spike-in fractions
         val_dataset (tf.data.Dataset): Validation dataset
+        Tval (np.ndarray): Validation spike-in fractions
+        Xtrn_raw (np.ndarray): Raw training features for per-fraction AUC-PR computation
+        Ytrn_raw (np.ndarray): Raw training labels for per-fraction AUC-PR computation
+        Xval_raw (np.ndarray): Raw validation features for per-fraction AUC-PR computation
+        Yval_raw (np.ndarray): Raw validation labels for per-fraction AUC-PR computation
         singleton (bool): Whether to use singleton mode (affects data augmentation)
         BATCH_SIZE (int): Batch size for training
 
@@ -102,7 +209,11 @@ def objective(trial: optuna.Trial, train_dataset, val_dataset,
     pruning_callback = TFKerasPruningCallback(trial, "val_auc_pr")
     capacity_check = CapacityCheckCallback(patience=15, min_train_auc=0.65)
     model.compile(optimizer=optimizer, loss=loss, weighted_metrics = metrics, jit_compile=True)
-    callbacks = [ earlyStop, clr, pruning_callback, capacity_check ]
+    # Create callback for per-fraction AUC-PR computation after each epoch
+    fraction_auc_callback = FractionAUCPRCallback(X_train=Xtrn_raw, Y_train=Ytrn_raw, T_train=Ttrn,
+                                                  X_val=Xval_raw, Y_val=Yval_raw, T_val=Tval,
+                                                  verbose=1)
+    callbacks = [ earlyStop, clr, pruning_callback, capacity_check, fraction_auc_callback ]
     # print summary of hyperparameters for this trial
     print(f"Trial {trial.number} hyperparameters:")
     for key, value in trial.params.items():
@@ -131,14 +242,20 @@ def objective(trial: optuna.Trial, train_dataset, val_dataset,
 
 ##-----------------------------------------------------------------------------------------------##
 
-def study_training(Xtrn, Ytrn, Wtrn, Xval, Yval, Wval,
+def study_training(Xtrn, Ytrn, Wtrn, Ttrn, Xval, Yval, Wval, Tval,
                    singleton=False, BATCH_SIZE=128) -> optuna.Study:
     """
     Conduct hyperparameter optimization study using Optuna.
 
     Args:
-        training_data (tf.data.Dataset): Training dataset
-        validation_data (tf.data.Dataset): Validation dataset
+        Xtrn (np.ndarray): Training feature data
+        Ytrn (np.ndarray): Training labels
+        Wtrn (np.ndarray): Training sample weights
+        Ttrn (np.ndarray): Training spike-in fractions
+        Xval (np.ndarray): Validation feature data
+        Yval (np.ndarray): Validation labels
+        Wval (np.ndarray): Validation sample weights
+        Tval (np.ndarray): Validation spike-in fractions
         singleton (bool): Whether to use singleton mode (affects data augmentation)
         BATCH_SIZE (int): Batch size for training
 
@@ -155,13 +272,18 @@ def study_training(Xtrn, Ytrn, Wtrn, Xval, Yval, Wval,
     val_dataset = val_dataset.batch(BATCH_SIZE)
     val_dataset = val_dataset.cache()
     val_dataset = val_dataset.prefetch(AUTOTUNE)
+    # Keep raw data for per-fraction AUC-PR computation
+    Xtrn_raw, Ytrn_raw = Xtrn.copy(), Ytrn.copy()
+    Xval_raw, Yval_raw = Xval.copy(), Yval.copy()
     del Xtrn, Ytrn, Wtrn, Xval, Yval, Wval  # free memory
     gc.collect()
     # Create and run Optuna study
     pruner = optuna.pruners.MedianPruner(n_warmup_steps=5)
     study = optuna.create_study(direction="maximize", pruner=pruner)
     study.optimize(lambda trial:
-                   objective(trial, train_dataset, val_dataset, singleton, BATCH_SIZE), 
+                   objective(trial, train_dataset, Ttrn, val_dataset,
+                             Tval, Xtrn_raw, Ytrn_raw, Xval_raw, Yval_raw, 
+                             singleton, BATCH_SIZE), 
                    n_trials=40, timeout=None)
     print("Best value:", study.best_value)
     print("Best params:", study.best_params)

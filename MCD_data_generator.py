@@ -198,7 +198,8 @@ def group_size(sampleset, max_allowed, label_df, these_labels) -> pd.Index:
 
 import numpy as np
 
-def data_augmentor(data_vec, beta_norm, keep, combined_pheno_labels, dup_size=4) -> np.ndarray:
+def data_augmentor(data_vec, beta_norm, keep, combined_pheno_labels,
+                   dup_size=4) -> tuple[np.ndarray, np.ndarray]:
     """
     Augmentation generator that yields batches of data with leukocyte spike-in augmentation.
   
@@ -213,10 +214,11 @@ def data_augmentor(data_vec, beta_norm, keep, combined_pheno_labels, dup_size=4)
         dup_size(int): duplication factor for augmentation
 
     Returns:
-        np.ndarray: batch of augmented methylation data
+        tuple: batch of augmented methylation data and corresponding spike-in fractions
     """
     leukocyte_indices = combined_pheno_labels.index[combined_pheno_labels['leukocyte'] > 0].tolist()
     batch_x = []
+    batch_t = []
     for _ in range(dup_size):
         # spike-in fraction
         for s in [0.5, 0.25, 0.125, 0.05, 0.025]:
@@ -228,7 +230,8 @@ def data_augmentor(data_vec, beta_norm, keep, combined_pheno_labels, dup_size=4)
             # Mix: d = (1-s)*row_l + s*row_r
             d = ((1 - s) * row_l) + (s * row_r)
             batch_x.append(d)
-    return np.array(batch_x)
+            batch_t.append(s)
+    return np.array(batch_x), np.array(batch_t)
 
 ##-----------------------------------------------------------------------------------------------##
 
@@ -296,7 +299,7 @@ def _data_augmentor_wrapper(args):
         args (tuple): Tuple containing data_vec and dup_size
 
     Returns:
-        np.ndarray: Augmented data batch
+        tuple: Augmented data and spike-in fractions
     """
     data_vec, dup_size = args
     return data_augmentor(data_vec, _beta_norm, _keep, _combined_pheno_labels, dup_size)
@@ -355,12 +358,17 @@ def data_generator(current_label, beta_norm, combined_pheno_labels,
         d = 4 # duplication factor for augmentation
         # Augment training data
         items = tqdm([ (train_x[s,:], d) for s in range(len(train_x))], desc="Augment training")
-        exp_train_x = np.vstack(pool.map(_data_augmentor_wrapper, items, chunksize=1)).astype(nf16)
+        
+        exp_train_x, exp_train_t = zip(*pool.map(_data_augmentor_wrapper, items, chunksize=1))
+        exp_train_x = np.vstack(exp_train_x).astype(nf16)
+        exp_train_t = np.hstack(exp_train_t).astype(nf16)
         exp_train_y = np.vstack([ np.tile(train_y[s,:], (5*d,1)) for s in range(len(train_y)) ]).astype(nf16)
         exp_train_w = np.hstack([ np.tile(train_w[s], 5*d) for s in range(len(train_w)) ]).astype(nf16)
         # Augment validation data
         items = tqdm([ (valid_x[s,:], d) for s in range(len(valid_x))], desc="Augment validation")
-        exp_valid_x = np.vstack(pool.map(_data_augmentor_wrapper, items, chunksize=1)).astype(nf16)
+        exp_valid_x, exp_valid_t = zip(*pool.map(_data_augmentor_wrapper, items, chunksize=1))
+        exp_valid_x = np.vstack(exp_valid_x).astype(nf16)
+        exp_valid_t = np.hstack(exp_valid_t).astype(nf16)
         exp_valid_y = np.vstack([ np.tile(valid_y[s,:], (5*d,1)) for s in range(len(valid_y)) ]).astype(nf16)
         exp_valid_w = np.hstack([ np.tile(valid_w[s], 5*d) for s in range(len(valid_w)) ]).astype(nf16)
     # print a comparison between the sample label distributions between
@@ -374,8 +382,8 @@ def data_generator(current_label, beta_norm, combined_pheno_labels,
     unique, counts = np.unique(exp_valid_y, return_counts=True, axis=0)
     for u in range(len(unique)):
         print(f"Label {unique[u]}: {counts[u]} ({counts[u] / counts.sum() * 100:.2f}%)")
-    to_return = { 'Xtrn': exp_train_x, 'Ytrn': exp_train_y, 'Wtrn': exp_train_w,
-                  'Xval': exp_valid_x, 'Yval': exp_valid_y, 'Wval': exp_valid_w }
+    to_return = { 'Xtrn': exp_train_x, 'Ytrn': exp_train_y, 'Wtrn': exp_train_w, 'Ttrn': exp_train_t,
+                  'Xval': exp_valid_x, 'Yval': exp_valid_y, 'Wval': exp_valid_w, 'Tval': exp_valid_t }
     return to_return
 
 ##-----------------------------------------------------------------------------------------------##
