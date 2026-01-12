@@ -203,7 +203,7 @@ def data_augmentor(data_vec, beta_norm, keep, combined_pheno_labels,
     """
     Augmentation generator that yields batches of data with leukocyte spike-in augmentation.
   
-    For each sample, randomly selects a spike-in fraction (0.5, 0.25, 0.125, 0.0625, 0.03125),
+    For each sample, randomly selects a spike-in fraction (0.5, 0.25, 0.125, 0.0625),
     finds a leukocyte sample, mixes it with the current sample, and converts to binary.
     
     Args:
@@ -221,7 +221,7 @@ def data_augmentor(data_vec, beta_norm, keep, combined_pheno_labels,
     batch_t = []
     for _ in range(dup_size):
         # spike-in fraction
-        for s in [0.5, 0.25, 0.125, 0.0625, 0.03125]:
+        for s in [0.5, 0.25, 0.125, 0.0625]:
             # Random leukocyte sample
             i = np.random.choice(leukocyte_indices)
             # Get data vectors
@@ -373,19 +373,19 @@ def data_generator(current_label, beta_norm, combined_pheno_labels,
         exp_train_x, exp_train_t = zip(*pool.map(_data_augmentor_wrapper, items, chunksize=1))
         exp_train_x = np.vstack(exp_train_x).astype(nf16)
         exp_train_t = np.hstack(exp_train_t).astype(nf16)
-        exp_train_y = np.vstack([ np.tile(train_y[s,:], (5*d,1)) for s in range(len(train_y)) ]).astype(nf16)
+        exp_train_y = np.vstack([ np.tile(train_y[s,:], (4*d,1)) for s in range(len(train_y)) ]).astype(nf16)
         # Build weights with fraction-based adjustment (emphasize low-fraction samples)
         # Adjust this: 0=off, 1=linear, 2=quadratic
-        exp_train_w = build_sample_weights(main_label, pd.Index(np.repeat(train_index, 5*d)),
+        exp_train_w = build_sample_weights(main_label, pd.Index(np.repeat(train_index, 4*d)),
                                            fractions=exp_train_t, fraction_weight_power=1.0)
         # Augment validation data
         items = tqdm([ (valid_x[s,:], d) for s in range(len(valid_x))], desc="Augment validation")
         exp_valid_x, exp_valid_t = zip(*pool.map(_data_augmentor_wrapper, items, chunksize=1))
         exp_valid_x = np.vstack(exp_valid_x).astype(nf16)
         exp_valid_t = np.hstack(exp_valid_t).astype(nf16)
-        exp_valid_y = np.vstack([ np.tile(valid_y[s,:], (5*d,1)) for s in range(len(valid_y)) ]).astype(nf16)
+        exp_valid_y = np.vstack([ np.tile(valid_y[s,:], (4*d,1)) for s in range(len(valid_y)) ]).astype(nf16)
         # Validation weights also fraction-adjusted for consistent evaluation
-        exp_valid_w = build_sample_weights(main_label, pd.Index(np.repeat(valid_index, 5*d)),
+        exp_valid_w = build_sample_weights(main_label, pd.Index(np.repeat(valid_index, 4*d)),
                                            fractions=exp_valid_t, fraction_weight_power=1.0)
     # print a comparison between the sample label distributions between
     #   exp_train_y and exp_valid_y
