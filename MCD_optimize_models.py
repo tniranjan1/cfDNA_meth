@@ -19,17 +19,18 @@ tf.config.threading.set_inter_op_parallelism_threads(10)  # Parallel independent
 
 ##-----------------------------------------------------------------------------------------------##
 
-def compute_auc_pr_per_fraction(y_true, y_pred, fractions):
+def compute_auc_pr_per_fraction(y_true, y_pred, sample_weights, fractions):
     """
-    Compute AUC-PR for each unique spike-in fraction.
+    Compute AUC-PR for each unique spike-in fraction, weighted by sample weights.
     
     Args:
         y_true (np.ndarray): True labels (one-hot encoded or binary)
         y_pred (np.ndarray): Predicted probabilities
+        sample_weights (np.ndarray): Sample weights for each sample
         fractions (np.ndarray): Spike-in fractions for each sample
         
     Returns:
-        dict: Dictionary mapping each unique fraction to its AUC-PR score
+        dict: Dictionary mapping each unique fraction to its weighted AUC-PR score
     """
     unique_fractions = np.unique(fractions)
     auc_pr_per_fraction = {}
@@ -39,21 +40,29 @@ def compute_auc_pr_per_fraction(y_true, y_pred, fractions):
             continue
         y_true_frac = y_true[mask]
         y_pred_frac = y_pred[mask]
+        weights_frac = sample_weights[mask]
         # Handle one-hot encoded labels
         if len(y_true_frac.shape) > 1 and y_true_frac.shape[1] > 1:
-            # For multi-class, compute macro-averaged AUC-PR
+            # For multi-class, compute weighted macro-averaged AUC-PR
             auc_pr = 0.0
             n_classes = y_true_frac.shape[1]
+            valid_classes = 0
             for c in range(n_classes):
                 if len(np.unique(y_true_frac[:, c])) > 1:  # Need both classes
-                    auc_pr += average_precision_score(y_true_frac[:, c], y_pred_frac[:, c])
-            auc_pr /= n_classes
+                    auc_pr += average_precision_score(y_true_frac[:, c], y_pred_frac[:, c],
+                                                      sample_weight=weights_frac)
+                    valid_classes += 1
+            if valid_classes > 0:
+                auc_pr /= valid_classes
+            else:
+                continue
         else:
             # Binary classification
             y_true_flat = y_true_frac.ravel() if len(y_true_frac.shape) > 1 else y_true_frac
             y_pred_flat = y_pred_frac.ravel() if len(y_pred_frac.shape) > 1 else y_pred_frac
             if len(np.unique(y_true_flat)) > 1:  # Need both classes
-                auc_pr = average_precision_score(y_true_flat, y_pred_flat)
+                auc_pr = average_precision_score(y_true_flat, y_pred_flat,
+                                                 sample_weight=weights_frac)
             else:
                 continue
         auc_pr_per_fraction[float(frac)] = auc_pr
@@ -71,19 +80,23 @@ class FractionAUCPRCallback(tf.keras.callbacks.Callback):
     Args:
         X_train (np.ndarray): Training features
         Y_train (np.ndarray): Training labels
+        W_train (np.ndarray): Training sample weights
         T_train (np.ndarray): Training spike-in fractions
         X_val (np.ndarray): Validation features
         Y_val (np.ndarray): Validation labels
+        W_val (np.ndarray): Validation sample weights
         T_val (np.ndarray): Validation spike-in fractions
         verbose (int): Verbosity level (0=silent, 1=print per-fraction metrics)
     """
-    def __init__(self, X_train, Y_train, T_train, X_val, Y_val, T_val, verbose=0):
+    def __init__(self, X_train, Y_train, W_train, T_train, X_val, Y_val, W_val, T_val, verbose=0):
         super().__init__()
         self.X_train = X_train
         self.Y_train = Y_train
+        self.W_train = W_train
         self.T_train = T_train
         self.X_val = X_val
         self.Y_val = Y_val
+        self.W_val = W_val
         self.T_val = T_val
         self.verbose = verbose
         # Get unique fractions for metric names
@@ -93,18 +106,19 @@ class FractionAUCPRCallback(tf.keras.callbacks.Callback):
         logs = logs or {}
         # Compute training AUC-PR per fraction
         y_pred_train = self.model.predict(self.X_train, verbose=0)  # type: ignore[union-attr]
-        train_auc_pr = compute_auc_pr_per_fraction(self.Y_train, y_pred_train, self.T_train)
+        train_auc_pr = compute_auc_pr_per_fraction(self.Y_train, y_pred_train, self.W_train, self.T_train)
         # Compute validation AUC-PR per fraction
         y_pred_val = self.model.predict(self.X_val, verbose=0)  # type: ignore[union-attr]
-        val_auc_pr = compute_auc_pr_per_fraction(self.Y_val, y_pred_val, self.T_val)
+        val_auc_pr = compute_auc_pr_per_fraction(self.Y_val, y_pred_val, self.W_val, self.T_val)
         # Log training metrics
         for frac, auc_pr in train_auc_pr.items():
             metric_name = f"auc_pr_frac_{frac:.4f}"
             logs[metric_name] = auc_pr
         # Log validation metrics
-        for frac, auc_pr in val_auc_pr.items():
-            metric_name = f"val_auc_pr_frac_{frac:.4f}"
-            logs[metric_name] = auc_pr
+        if self.verbose == 0:
+            for frac, auc_pr in val_auc_pr.items():
+                metric_name = f"val_auc_pr_frac_{frac:.4f}"
+                logs[metric_name] = auc_pr
         # Optionally print per-fraction AUC-PR
         if self.verbose > 0:
             print(f"\n  Epoch {epoch + 1} - AUC-PR per spike-in fraction:")
@@ -117,8 +131,7 @@ class FractionAUCPRCallback(tf.keras.callbacks.Callback):
 
 ##-----------------------------------------------------------------------------------------------##
 
-def objective(trial: optuna.Trial, train_dataset, Ttrn, val_dataset,
-              Tval, Xtrn_raw, Ytrn_raw, Xval_raw, Yval_raw, 
+def objective(trial: optuna.Trial, Xtrn, Ytrn, Wtrn, Ttrn, Xval, Yval, Wval, Tval, 
               singleton=False, BATCH_SIZE=128) -> float:
     """
     Objective function for Optuna hyperparameter optimization of a methylation classification model.
@@ -181,8 +194,8 @@ def objective(trial: optuna.Trial, train_dataset, Ttrn, val_dataset,
     start_lr     = trial.suggest_float("lr", 1e-6, 1e-3, log=True)
     label_smooth = trial.suggest_float("label_smoothing", 0.0, 0.05)
     # Define loss and final activation functions
-    n_cpgs = train_dataset.element_spec[0].shape[1]
-    n_classes = train_dataset.element_spec[1].shape[1]
+    n_cpgs = Xtrn.shape[1]
+    n_classes = Ytrn.shape[1]
     if n_classes == 1:
         loss = tf.keras.losses.BinaryCrossentropy(from_logits=False)
         out_activation = 'sigmoid'
@@ -196,11 +209,11 @@ def objective(trial: optuna.Trial, train_dataset, Ttrn, val_dataset,
                              dropout_h1=dropout_h1, dropout_h2=dropout_h2,
                              use_hidden1=use_hidden1, use_hidden2=use_hidden2,
                              out_activation=out_activation, singleton=singleton)
-    metrics = [ tf.keras.metrics.AUC(multi_label=False, name="auc_roc"),
-                tf.keras.metrics.AUC(curve="PR", multi_label=False, name="auc_pr"),
+    metrics = [ tf.keras.metrics.AUC(multi_label=False, name="auc_roc", num_thresholds=1000),
+                tf.keras.metrics.AUC(curve="PR", multi_label=False, name="auc_pr", num_thresholds=1000),
                 tf.keras.metrics.Precision(name="precision"), 
                 tf.keras.metrics.Recall(name="recall") ]
-    steps_per_epoch = tf.data.experimental.cardinality(train_dataset).numpy()
+    steps_per_epoch = Xtrn.shape[0] // BATCH_SIZE
     optimizer = tf.keras.optimizers.Adam(learning_rate=start_lr)
     clr = CyclicLR(base_lr=1e-7, max_lr=start_lr, step_size=2*steps_per_epoch,
                    mode='triangular', monitor='val_loss', patience=8, factor=0.5, min_delta=0.99,
@@ -210,16 +223,20 @@ def objective(trial: optuna.Trial, train_dataset, Ttrn, val_dataset,
     capacity_check = CapacityCheckCallback(patience=15, min_train_auc=0.65)
     model.compile(optimizer=optimizer, loss=loss, weighted_metrics = metrics, jit_compile=True)
     # Create callback for per-fraction AUC-PR computation after each epoch
-    fraction_auc_callback = FractionAUCPRCallback(X_train=Xtrn_raw, Y_train=Ytrn_raw, T_train=Ttrn,
-                                                  X_val=Xval_raw, Y_val=Yval_raw, T_val=Tval, verbose=1)
+    fraction_auc_callback = FractionAUCPRCallback(X_train=Xtrn, Y_train=Ytrn,
+                                                  W_train=Wtrn, T_train=Ttrn,
+                                                  X_val=Xval, Y_val=Yval,
+                                                  W_val=Wval, T_val=Tval, verbose=1)
     callbacks = [ earlyStop, clr, pruning_callback, capacity_check, fraction_auc_callback ]
     # print summary of hyperparameters for this trial
     print(f"Trial {trial.number} hyperparameters:")
     for key, value in trial.params.items():
         print(f"  {key}: {value}")
     # Train model
-    history = model.fit(train_dataset,
-                        validation_data=val_dataset,
+    history = model.fit(x=Xtrn,
+                        y=Ytrn,
+                        sample_weight=Wtrn,
+                        validation_data=(Xval, Yval, Wval),
                         epochs=1000,
                         batch_size=BATCH_SIZE,
                         verbose=2,  # type: ignore[arg-type]
@@ -261,27 +278,12 @@ def study_training(Xtrn, Ytrn, Wtrn, Ttrn, Xval, Yval, Wval, Tval,
     Returns:
         optuna.Study: The completed Optuna study object containing optimization results.
     """
-    AUTOTUNE = tf.data.AUTOTUNE
-    train_dataset = tf.data.Dataset.from_tensor_slices((Xtrn, Ytrn, Wtrn))
-    train_dataset = train_dataset.cache()  # Cache in memory
-    train_dataset = train_dataset.shuffle(buffer_size=Xtrn.shape[0], reshuffle_each_iteration=True)
-    train_dataset = train_dataset.batch(BATCH_SIZE)
-    train_dataset = train_dataset.prefetch(AUTOTUNE)  # Prefetch batches
-    val_dataset = tf.data.Dataset.from_tensor_slices((Xval, Yval, Wval))
-    val_dataset = val_dataset.batch(BATCH_SIZE)
-    val_dataset = val_dataset.cache()
-    val_dataset = val_dataset.prefetch(AUTOTUNE)
-    # Keep raw data for per-fraction AUC-PR computation
-    Xtrn_raw, Ytrn_raw = Xtrn.copy(), Ytrn.copy()
-    Xval_raw, Yval_raw = Xval.copy(), Yval.copy()
-    del Xtrn, Ytrn, Wtrn, Xval, Yval, Wval  # free memory
-    gc.collect()
     # Create and run Optuna study
     pruner = optuna.pruners.MedianPruner(n_warmup_steps=5)
     study = optuna.create_study(direction="maximize", pruner=pruner)
     study.optimize(lambda trial:
-                   objective(trial, train_dataset, Ttrn, val_dataset,
-                             Tval, Xtrn_raw, Ytrn_raw, Xval_raw, Yval_raw, 
+                   objective(trial, Xtrn, Ytrn, Wtrn, Ttrn,
+                             Xval, Yval, Wval, Tval,
                              singleton, BATCH_SIZE), 
                    n_trials=40, timeout=None)
     print("Best value:", study.best_value)
