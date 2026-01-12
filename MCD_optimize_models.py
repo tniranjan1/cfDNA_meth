@@ -110,6 +110,9 @@ class FractionAUCPRCallback(tf.keras.callbacks.Callback):
         # Compute validation AUC-PR per fraction
         y_pred_val = self.model.predict(self.X_val, verbose=0)  # type: ignore[union-attr]
         val_auc_pr = compute_auc_pr_per_fraction(self.Y_val, y_pred_val, self.W_val, self.T_val)
+        # Clean up
+        del y_pred_train, y_pred_val
+        gc.collect()
         # Log training metrics
         for frac, auc_pr in train_auc_pr.items():
             metric_name = f"auc_pr_frac_{frac:.4f}"
@@ -176,6 +179,9 @@ def objective(trial: optuna.Trial, Xtrn, Ytrn, Wtrn, Ttrn, Xval, Yval, Wval, Tva
          Global variables Xtr, Ytr, Xval, Yval, Wtr, Wval are expected to be in scope.
          The build_meth_model function must be defined and available.
     """
+    # Clean up memory from previous trial
+    gc.collect()
+    tf.keras.backend.clear_session()
     # Fix seeds to reduce trial variance (Lambda layer remains stochastic)
     seed = 42
     tf.random.set_seed(seed)
@@ -245,6 +251,10 @@ def objective(trial: optuna.Trial, Xtrn, Ytrn, Wtrn, Ttrn, Xval, Yval, Wval, Tva
                         use_multiprocessing=True,
                         workers=10,
                         max_queue_size=10)
+    # Clean up memory
+    del model
+    gc.collect()
+    tf.keras.backend.clear_session()
     # Optimize for validation PR AUC if available; fallback to ROC AUC and then val_loss
     if history is None:
         return 0.0
