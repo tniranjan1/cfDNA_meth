@@ -373,14 +373,24 @@ def data_generator(current_label, beta_norm, combined_pheno_labels,
     # get samples for training set
     train_index = [ group_size(label_df.index[label_df[t] > 0], **prms) for t in current_label ]
     train_index = pd.Index([ item for s in train_index for item in s ])
-    if len(current_label) == 1:
+    ti_size = len(train_index)
+    class_represent = not (label_df[current_label].loc[train_index].sum() > 0).all()
+    if len(current_label) == 1 or class_represent:
         anti_label_index = label_df[(label_df[current_label] == 0).iloc[:,0]].index.tolist()
         anti_label_index = group_size(pd.Index(anti_label_index), **prms)
         train_index = train_index.append(anti_label_index)
     # get samples for validation set
-    valid_index = [ b for b in beta_norm.index if b not in train_index ]
+    valid_index = [ b for b in label_df.index[label_df[current_label].sum(axis=1) > 0] if b not in train_index ]
     valid_index = pd.Index(valid_index)
     valid_index = group_size(valid_index, max_valid, label_df, these_labels)
+    class_represent = not (label_df[current_label].loc[valid_index].sum() > 0).all()
+    if len(current_label) == 1 or class_represent:
+        valid_neg_index = label_df[(label_df[current_label].sum(axis=1) == 0)].index.tolist()
+        valid_neg_index = [ b for b in valid_neg_index if b not in valid_index and b not in train_index ]
+        valid_neg_index = pd.Index(valid_neg_index)
+        valid_neg_index = group_size(valid_neg_index, max_valid, label_df, these_labels)
+        valid_neg_index = valid_neg_index[:int(len(valid_index) / ti_size * len(valid_neg_index))]
+        valid_index = valid_index.append(valid_neg_index)
     # build unaugmented training data array
     train_x = np.array(beta_norm.loc[train_index,keep > 0])
     # build matching training labels array
