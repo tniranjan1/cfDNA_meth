@@ -126,6 +126,8 @@ def get_allowed_sizes(these_labels, train_size, combined_pheno_labels, max_size=
 
 ##-----------------------------------------------------------------------------------------------##
 
+import random
+
 def group_size(sampleset, max_allowed, label_df, these_labels) -> pd.Index:
     """
     Reduce sample set to fit within maximum allowed size per label category.
@@ -173,7 +175,22 @@ def group_size(sampleset, max_allowed, label_df, these_labels) -> pd.Index:
     current_counts = label_subset.values.sum(axis=0)
     # Iterate backwards through samples (last to first)
     # range(len-1, -1, -1) goes from last index down to 0
-    for i in range(len(sampleset) - 1, -1, -1):
+    random.seed(42)
+    # count total sizes of combined label categories
+    total_weights = []
+    for i in range(len(sampleset)):
+        row = ''.join(label_subset.values[i].astype(str))
+        total_weights.append(row)
+    total_counts = pd.Series(total_weights).value_counts()
+    # assign inverse weight to each sample based on contribution to current_counts
+    inverse_weights = []
+    for i in range(len(sampleset)):
+        row = ''.join(label_subset.values[i].astype(str))
+        weight = 1.0 / total_counts[row]
+        inverse_weights.append(weight)
+    random_sample_order = random.sample(sampleset.tolist(), len(sampleset))
+    for s in random_sample_order:
+        i = sampleset.get_loc(s)
         # Check if we've reduced all labels to within limits; if so, stop early
         if not any(current_counts > max_arr):
             break
@@ -193,7 +210,14 @@ def group_size(sampleset, max_allowed, label_df, these_labels) -> pd.Index:
             keep_mask[i] = False
     # Return only the samples marked True in keep_mask
     # Boolean indexing on pd.Index returns a filtered pd.Index
-    return sampleset[keep_mask]
+    np.random.seed(42)
+    # select samples from sampleset with probability of selection based on inverse_weights
+    # Normalize inverse_weights to create a valid probability distribution
+    inverse_weights_array = np.array(inverse_weights)
+    probabilities = inverse_weights_array / inverse_weights_array.sum()
+    # Randomly select 60 items from sampleset using inverse_weights as probabilities
+    selected_samples = np.random.choice(sampleset.tolist(), size=keep_mask.sum(), replace=False, p=probabilities)
+    return pd.Index(selected_samples)
 
 ##-----------------------------------------------------------------------------------------------##
 
