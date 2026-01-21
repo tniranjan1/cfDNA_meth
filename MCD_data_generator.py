@@ -117,9 +117,10 @@ def get_allowed_sizes(these_labels, train_size, combined_pheno_labels, max_size=
     Returns:
         tuple[pd.Series, pd.Series]: Tuple of maximum allowed sizes for training and validation sets
     """
+    all_labels = list(set([ s for t in these_labels for s in t ]))
     # check if sample names sum to less than allowable for training size
-    max_allowed = pd.Series([ train_size[t] for t in these_labels[0] ], index=these_labels[0])
-    max_valid = combined_pheno_labels[these_labels[0]].sum() - max_allowed
+    max_allowed = pd.Series([ train_size[t] for t in all_labels ], index=all_labels)
+    max_valid = combined_pheno_labels[all_labels].sum() - max_allowed
     max_valid[max_valid > max_size] = max_size
     return max_allowed, max_valid
 
