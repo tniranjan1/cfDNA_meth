@@ -153,7 +153,7 @@ def group_size(sampleset, max_allowed, label_df, these_labels) -> pd.Index:
         10 LabelA samples to bring it within the limit.
     """
     # Extract the primary label column names from the nested list structure
-    labels = these_labels[0]
+    labels = list(set([ s for t in these_labels for s in t ]))
     # Create a subset DataFrame containing only the samples in sampleset
     # and only the columns for the labels we're checking
     label_subset = label_df[labels].loc[sampleset]
