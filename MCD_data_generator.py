@@ -297,6 +297,9 @@ def build_sample_weights(main_label, sample_index, fractions=None,
         # Weight inversely proportional to fraction (lower fraction = higher weight)
         # Add small epsilon to avoid division by zero
         fraction_weights = (1.0 / (fractions + 1e-6)) ** fraction_weight_power
+        # scale fraction_weights so that max is never exceeds 4x the min
+        fraction_weights = fraction_weights / fraction_weights.min()
+        fraction_weights = np.clip(fraction_weights, None, 4.0)
         # Normalize fraction weights to have mean 1 (preserve overall weight scale)
         fraction_weights = fraction_weights / fraction_weights.mean()
         sample_w = sample_w * fraction_weights

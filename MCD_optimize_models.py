@@ -192,7 +192,7 @@ def objective(trial: optuna.Trial, Xtrn, Ytrn, Wtrn, Ttrn, Xval, Yval, Wval, Tva
     l2_proj      = trial.suggest_float("l2_proj", 1e-6, 1e-2, log=True)
     l2_hidden    = trial.suggest_float("l2_hidden", 1e-6, 1e-2, log=True)
     noise_std    = trial.suggest_float("noise_std", 1e-3, 5e-2, log=True)
-    dropout_proj = trial.suggest_float("dropout", 0.1, 0.6)
+    dropout_proj = trial.suggest_float("dropout", 0.4, 0.8)
 #    dropout_h1   = trial.suggest_float("dropout_h1", 0.1, 0.6)
 #    dropout_h2   = trial.suggest_float("dropout_h2", 0.1, 0.6)
     dropout_h1   = dropout_proj
