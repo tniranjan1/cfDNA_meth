@@ -146,7 +146,7 @@ def objective(trial: optuna.Trial, Xtrn, Ytrn, Wtrn, Ttrn, Xval, Yval, Wval, Tva
     The function performs the following steps:
     1. Sets random seeds for reproducibility across trials
     2. Suggests hyperparameters from predefined search spaces:
-        - proj_dim: projection layer dimension (categorical values: 43, 64, 128, 256, 512)
+        - proj_dim: projection layer dimension (categorical values: 16, 32, 64, 128)
         - l1_proj, l2_proj, l2_hidden: L1/L2 regularization coefficients (log-uniform ranges)
         - noise_std: standard deviation of Gaussian noise layer (log-uniform range)
         - dropout_proj, dropout_h1: dropout rates for projection and hidden layers
@@ -187,16 +187,20 @@ def objective(trial: optuna.Trial, Xtrn, Ytrn, Wtrn, Ttrn, Xval, Yval, Wval, Tva
     tf.random.set_seed(seed)
     np.random.seed(seed)
     # Search space
-    proj_dim     = trial.suggest_categorical("proj_dim", [16, 32, 64, 128, 256, 512])
+    proj_dim     = trial.suggest_categorical("proj_dim", [16, 32, 64, 128])
     l1_proj      = trial.suggest_float("l1_proj", 1e-6, 1e-2, log=True)
     l2_proj      = trial.suggest_float("l2_proj", 1e-6, 1e-2, log=True)
     l2_hidden    = trial.suggest_float("l2_hidden", 1e-6, 1e-2, log=True)
     noise_std    = trial.suggest_float("noise_std", 1e-3, 5e-2, log=True)
-    dropout_proj = trial.suggest_float("dropout_proj", 0.1, 0.6)
-    dropout_h1   = trial.suggest_float("dropout_h1", 0.1, 0.6)
-    dropout_h2   = trial.suggest_float("dropout_h2", 0.1, 0.6)
-    use_hidden1  = trial.suggest_categorical("use_hidden1", [False, True])
-    use_hidden2  = trial.suggest_categorical("use_hidden2", [False, True])
+    dropout_proj = trial.suggest_float("dropout", 0.1, 0.6)
+#    dropout_h1   = trial.suggest_float("dropout_h1", 0.1, 0.6)
+#    dropout_h2   = trial.suggest_float("dropout_h2", 0.1, 0.6)
+    dropout_h1   = dropout_proj
+    dropout_h2   = dropout_proj
+#    use_hidden1  = trial.suggest_categorical("use_hidden1", [False, True])
+#    use_hidden2  = trial.suggest_categorical("use_hidden2", [False, True])
+    use_hidden1  = True
+    use_hidden2  = True
     start_lr     = trial.suggest_float("lr", 1e-6, 1e-3, log=True)
     label_smooth = trial.suggest_float("label_smoothing", 0.0, 0.05)
     # Define loss and final activation functions
@@ -289,7 +293,7 @@ def study_training(Xtrn, Ytrn, Wtrn, Ttrn, Xval, Yval, Wval, Tval,
         optuna.Study: The completed Optuna study object containing optimization results.
     """
     # Create and run Optuna study
-    pruner = optuna.pruners.MedianPruner(n_warmup_steps=5)
+    pruner = optuna.pruners.MedianPruner(n_warmup_steps=10)
     study = optuna.create_study(direction="maximize", pruner=pruner)
     study.optimize(lambda trial:
                    objective(trial, Xtrn, Ytrn, Wtrn, Ttrn,

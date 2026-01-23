@@ -76,7 +76,7 @@ def build_meth_model(n_cpgs, n_classes, proj_dim=128, l1_proj=1e-5, l2_proj=1e-5
         x = layers.BatchNormalization(name="hidden_batchnorm_1")(x)
         x = layers.Dropout(dropout_h1, name="hidden_dropout_1")(x)
         if use_hidden2:
-            x = layers.Dense(max(8, proj_dim // 4), activation="relu",
+            x = layers.Dense(max(1, proj_dim // 4), activation="relu",
                 kernel_regularizer=keras.regularizers.l2(l2_hidden),
                 name="hidden_dense_2")(x)
             x = layers.Dropout(dropout_h2, name="hidden_dropout_2")(x)
