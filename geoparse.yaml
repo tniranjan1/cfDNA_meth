@@ -1,0 +1,13 @@
+name: resource_acquisition
+channels:
+  - conda-forge
+  - anaconda
+  - bioconda
+dependencies:
+  - python=3.9
+  - pandas
+  - numpy
+  - beautifulsoup4
+  - pip
+  - pip:
+    - GEOparse
