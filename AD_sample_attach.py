@@ -113,7 +113,49 @@ def extract_methylation_data(gse: GEOparse.GEOTypes.GSE, gse_id: str) -> pd.Data
         return methylation_df
     else:
         logger.warning(f"No methylation table data found in {gse_id} GSM samples. "
-                      "Methylation data may be in supplementary files.")
+                      "Will search for methylation data in supplementary files.")
+        # if no tables found, search the supplementary files for the methylation data
+        methylation_df = try_extract_methylation_from_supplementary(gse, gse_id)
+        if not methylation_df.empty:
+            logger.info(f"Extracted methylation data from supplementary files for {gse_id}: {methylation_df.shape[0]} probes x {methylation_df.shape[1]} samples")
+            return methylation_df
+        else:
+            logger.warning(f"Failed to extract methylation data for {gse_id}")
+            return pd.DataFrame()
+
+##------------------------------------------------------------------------------------------------------##
+
+def try_extract_methylation_from_supplementary(gse: GEOparse.GEOTypes.GSE, gse_id: str) -> pd.DataFrame:
+    """
+    Attempt to extract methylation data from supplementary files if not found in GSM tables.
+    
+    Args:
+        gse: GEOparse GSE object
+        gse_id: GSE accession ID for labeling
+        
+    Returns:
+        DataFrame with methylation data (probes x samples) if found, else empty DataFrame
+    """
+    import glob
+    supp_files = gse.metadata.get('supplementary_file', [])
+    methylation_dfs = []
+    for url in supp_files:
+        if url and ('methylation' in url.lower() or 'beta' in url.lower()):
+            filename = os.path.basename(url)
+            local_path = os.path.join(gse._destdir, filename)
+            if os.path.exists(local_path):
+                try:
+                    df = pd.read_csv(local_path, sep='\t', index_col=0)
+                    methylation_dfs.append(df)
+                    logger.info(f"Loaded methylation data from supplementary file: {filename}")
+                except Exception as e:
+                    logger.warning(f"Failed to load methylation data from {filename}: {e}")
+            else:
+                logger.warning(f"Supplementary file not found locally: {filename}")
+    if methylation_dfs:
+        combined_df = pd.concat(methylation_dfs, axis=1)
+        return combined_df
+    else:
         return pd.DataFrame()
 
 ##------------------------------------------------------------------------------------------------------##
