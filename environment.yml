@@ -1,6 +1,7 @@
 name: cfdna-meth
 channels:
   - conda-forge
+  - bioconda
   - defaults
 dependencies:
   - python=3.10
@@ -18,3 +19,7 @@ dependencies:
   - p-tqdm=1.4.0
   - optuna=4.6.0
   - optuna-integration[tfkeras]
+  - anaconda
+  - pip
+  - pip:
+    - GEOparse
