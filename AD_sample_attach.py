@@ -229,7 +229,7 @@ def main():
     # Define the GSE studies to acquire
     gse_studies = ["GSE59685", "GSE80970", "GSE43414"]
     # Set output directory
-    output_dir = "./geo_data"
+    output_dir = "/results/ep/study/hg38s/study250-cfDNA_prelim/cfDNA-MS/AD_reference"
     logger.info(f"Starting acquisition of {len(gse_studies)} GSE studies")
     logger.info(f"Studies: {', '.join(gse_studies)}")
     # Acquire all studies
