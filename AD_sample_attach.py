@@ -3,11 +3,12 @@
 Script to acquire methylation data and metadata from GEO repositories.
 Studies: GSE59685, GSE80970, GSE43414
 """
-
 import os
 import pandas as pd
+import numpy as np
 import GEOparse # type: ignore
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional, Union, Literal
+from dataclasses import dataclass
 import logging
 
 # Configure logging
@@ -16,6 +17,42 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Memory management constants
+MAX_MEMORY_GB = 8.0
+BYTES_PER_FLOAT32 = 4
+
+# Type alias for compression options
+CompressionType = Optional[Literal['infer', 'gzip', 'bz2', 'zip', 'xz', 'zstd']]
+
+##------------------------------------------------------------------------------------------------------##
+
+@dataclass
+class MethylationData:
+    """
+    Container for methylation data with memory-efficient storage.
+    
+    Uses float32 numpy array for values and pandas Index objects for
+    row/column labels to reduce memory footprint.
+    """
+    values: np.ndarray  # float32 array, shape (n_probes, n_samples)
+    probe_ids: pd.Index  # row index (probe IDs)
+    sample_ids: Union[pd.Index, pd.MultiIndex]  # column index (sample names)
+    @property
+    def empty(self) -> bool:
+        """Check if the data container is empty."""
+        return self.values.size == 0
+    @property
+    def shape(self) -> tuple:
+        """Return the shape of the values array."""
+        return self.values.shape
+    def to_dataframe(self) -> pd.DataFrame:
+        """Convert to pandas DataFrame (caution: may use more memory)."""
+        return pd.DataFrame(self.values, index=self.probe_ids, columns=self.sample_ids)
+    def to_csv(self, path: str, compression: CompressionType = None):
+        """Save to CSV file, optionally compressed."""
+        df = self.to_dataframe()
+        df.to_csv(path, compression=compression)
 
 ##------------------------------------------------------------------------------------------------------##
 
@@ -86,77 +123,259 @@ def extract_sample_metadata(gse: GEOparse.GEOTypes.GSE, gse_id: str) -> pd.DataF
 
 ##------------------------------------------------------------------------------------------------------##
 
-def extract_methylation_data(gse: GEOparse.GEOTypes.GSE, gse_id: str) -> pd.DataFrame:
-    """
-    Extract methylation beta values from a GSE object.
-    
-    Args:
-        gse: GEOparse GSE object
-        gse_id: GSE accession ID for labeling
-        
-    Returns:
-        DataFrame with methylation data (probes x samples)
-    """
-    methylation_tables = []
-    for gsm_name, gsm in gse.gsms.items():
-        if gsm.table is not None and not gsm.table.empty:
-            # Typically methylation arrays have ID_REF and VALUE columns
-            table = gsm.table.copy()
-            if 'ID_REF' in table.columns and 'VALUE' in table.columns:
-                table = table[['ID_REF', 'VALUE']].copy()
-                table.columns = ['probe_id', gsm_name]
-                table.set_index('probe_id', inplace=True)
-                methylation_tables.append(table)
-    if methylation_tables:
-        methylation_df = pd.concat(methylation_tables, axis=1)
-        logger.info(f"Extracted methylation data: {methylation_df.shape[0]} probes x {methylation_df.shape[1]} samples from {gse_id}")
-        return methylation_df
-    else:
-        logger.warning(f"No methylation table data found in {gse_id} GSM samples. "
-                      "Will search for methylation data in supplementary files.")
-        # if no tables found, search the supplementary files for the methylation data
-        methylation_df = try_extract_methylation_from_supplementary(gse, gse_id)
-        if not methylation_df.empty:
-            logger.info(f"Extracted methylation data from supplementary files for {gse_id}: {methylation_df.shape[0]} probes x {methylation_df.shape[1]} samples")
-            return methylation_df
-        else:
-            logger.warning(f"Failed to extract methylation data for {gse_id}")
-            return pd.DataFrame()
+def _create_empty_methylation_data() -> MethylationData:
+    """Create an empty MethylationData object."""
+    return MethylationData(
+        values=np.array([], dtype=np.float32).reshape(0, 0),
+        probe_ids=pd.Index([], name='probe_id'),
+        sample_ids=pd.Index([], name='sample_id')
+    )
 
 ##------------------------------------------------------------------------------------------------------##
 
-def try_extract_methylation_from_supplementary(gse: GEOparse.GEOTypes.GSE, gse_id: str) -> pd.DataFrame:
+from tqdm import tqdm
+
+def extract_methylation_data(gse: GEOparse.GEOTypes.GSE, gse_id: str,
+                             destdir: str = "./geo_data") -> MethylationData:
     """
-    Attempt to extract methylation data from supplementary files if not found in GSM tables.
+    Extract methylation beta values from a GSE object.
+    
+    Uses memory-efficient storage with float32 numpy array and pandas Index objects.
+    Builds the array row by row and checks estimated size against memory limit.
     
     Args:
         gse: GEOparse GSE object
         gse_id: GSE accession ID for labeling
+        destdir: Directory where GEO data is stored
         
     Returns:
-        DataFrame with methylation data (probes x samples) if found, else empty DataFrame
+        MethylationData object with numpy array (float32) and indices
     """
-    import glob
+    # First pass: collect all probe IDs and sample names to determine dimensions
+    sample_names = []
+    sample_tables = {}
+    all_probes_set = set()
+    for gsm_name, gsm in gse.gsms.items():
+        if gsm.table is not None and not gsm.table.empty:
+            table = gsm.table
+            if 'ID_REF' in table.columns and 'VALUE' in table.columns:
+                sample_names.append(gsm_name)
+                # Store reference to table for later use
+                sample_tables[gsm_name] = table[['ID_REF', 'VALUE']]
+                all_probes_set.update(table['ID_REF'].dropna().values)
+    if not sample_names:
+        logger.warning(f"No methylation table data found in {gse_id} GSM samples. "
+                      "Will search for methylation data in supplementary files.")
+        result = try_extract_methylation_from_supplementary(gse, gse_id, destdir=destdir)
+        if not result.empty:
+            logger.info(f"Extracted methylation data from supplementary files for {gse_id}: "
+                       f"{result.shape[0]} probes x {result.shape[1]} samples")
+            return result
+        else:
+            logger.warning(f"Failed to extract methylation data for {gse_id}")
+            return _create_empty_methylation_data()
+    # Sort probes for consistent ordering
+    all_probes = sorted(all_probes_set)
+    n_probes = len(all_probes)
+    n_samples = len(sample_names)
+    # Check estimated memory size
+    estimated_bytes = n_probes * n_samples * BYTES_PER_FLOAT32
+    estimated_gb = estimated_bytes / (1024**3)
+    if estimated_gb > MAX_MEMORY_GB:
+        logger.warning(f"Estimated methylation array size ({estimated_gb:.2f} GB) exceeds "
+                      f"{MAX_MEMORY_GB} GB limit for {gse_id}. Stopping extraction.")
+        return _create_empty_methylation_data()
+    logger.info(f"Building methylation array: {n_probes} probes x {n_samples} samples "
+               f"(estimated size: {estimated_gb:.2f} GB)")
+    # Because the array is within the memory limit, we can build it in memory without streaming
+    values = np.full((n_probes, n_samples), np.nan, dtype=np.float32)
+    # For faster lookups
+    probe_id_to_index = pd.Series(index=np.arange(n_probes), data=all_probes)
+    for sample_idx, sample_name in tqdm(enumerate(sample_names), total=n_samples, desc=f"Processing samples for {gse_id}"):
+        table = sample_tables[sample_name]
+        table_as_series = pd.Series(data=table['VALUE'].values, index=table['ID_REF'].values)
+        values[:,sample_idx] = table_as_series[probe_id_to_index].values.astype(np.float32)
+    probe_ids = pd.Index(probe_id_to_index.values, name='probe_id')
+    sample_ids = pd.Index(sample_names, name='sample_id')
+    return MethylationData(values=values, probe_ids=probe_ids, sample_ids=sample_ids)
+
+##------------------------------------------------------------------------------------------------------##
+
+def try_extract_methylation_from_supplementary(gse: GEOparse.GEOTypes.GSE, gse_id: str, 
+                                                destdir: str = "./geo_data") -> MethylationData:
+    """
+    Attempt to extract methylation data from supplementary files if not found in GSM tables.
+    
+    Reads files line by line for memory efficiency, using float32 numpy arrays.
+    Monitors estimated array size and warns if it exceeds memory limit.
+    
+    Args:
+        gse: GEOparse GSE object
+        gse_id: GSE accession ID for labeling
+        destdir: Directory where GEO data is stored
+        
+    Returns:
+        MethylationData object with numpy array (float32) and indices if found, else empty
+    """
+    import gzip
+    import urllib.request
     supp_files = gse.metadata.get('supplementary_file', [])
-    methylation_dfs = []
+    methylation_results = []
     for url in supp_files:
         if url and ('methylation' in url.lower() or 'beta' in url.lower()):
             filename = os.path.basename(url)
-            local_path = os.path.join(gse._destdir, filename)
-            if os.path.exists(local_path):
+            local_path = os.path.join(destdir, gse_id, "supplementary", filename)
+            # Download file if needed
+            if not os.path.exists(local_path):
+                logger.info(f"Downloading supplementary file for methylation data: {filename}")
                 try:
-                    df = pd.read_csv(local_path, sep='\t', index_col=0)
-                    methylation_dfs.append(df)
-                    logger.info(f"Loaded methylation data from supplementary file: {filename}")
+                    os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                    urllib.request.urlretrieve(url, local_path)
                 except Exception as e:
-                    logger.warning(f"Failed to load methylation data from {filename}: {e}")
+                    logger.warning(f"Failed to download supplementary file {filename}: {e}")
+                    continue
             else:
-                logger.warning(f"Supplementary file not found locally: {filename}")
-    if methylation_dfs:
-        combined_df = pd.concat(methylation_dfs, axis=1)
-        return combined_df
-    else:
-        return pd.DataFrame()
+                logger.info(f"Supplementary file already exists: {filename}")
+            try:
+                # Determine file opener based on compression
+                open_func = gzip.open if filename.endswith('.gz') else open
+                # First pass: determine delimiter, skip rows, and header structure
+                first_line = '#'
+                skip_rows = 0
+                uses_quotes = False
+                with open_func(local_path, 'rt') as f:
+                    while '#' in first_line or first_line.strip() == '':
+                        first_line = f.readline().strip()
+                        skip_rows += 1
+                    sep = '\t' if '\t' in first_line else ','
+                skip_rows = max(0, skip_rows - 1)
+                uses_quotes = any([ n.startswith('"') and n.endswith('"') for n in first_line.split(sep) ])
+                # Determine header structure
+                with open_func(local_path, 'rt') as f:
+                    # Skip initial rows
+                    for _ in range(skip_rows):
+                        _ = f.readline()
+                    header_lines = []
+                    for line in f:
+                        line = line.replace('"', '') if uses_quotes else line
+                        if line.strip() and not line.startswith('#'):
+                            if not line.strip().startswith('cg'):
+                                header_lines.append(line.strip())
+                            else:
+                                break
+                    num_header_rows = len(header_lines)
+                # Parse header to get sample names
+                if num_header_rows > 1:
+                    # Multi-level header
+                    header_data = [line.split(sep) for line in header_lines]
+                    # First column is index, rest are samples
+                    sample_cols = [tuple(row[i] for row in header_data) 
+                                   for i in range(1, len(header_data[0]))]
+                    sample_ids = pd.MultiIndex.from_tuples(sample_cols)
+                else:
+                    # Single header row
+                    header_parts = header_lines[0].split(sep) if header_lines else []
+                    sample_ids = pd.Index(header_parts[1:], name='sample_id')  # Skip index column
+                n_samples = len(sample_ids)
+                # Second pass: read data row by row
+                rows_list = []
+                probe_ids_list = []
+                memory_exceeded = False
+                # get number of lines in file for progress bar
+                total_lines = sum(1 for _ in open_func(local_path, 'rt'))
+                total_lines -= skip_rows + num_header_rows
+                with open_func(local_path, 'rt') as f:
+                    # Skip header rows
+                    for _ in range(skip_rows + num_header_rows):
+                        _ = f.readline()
+                    line_count = 0
+                    for line in tqdm(f, total=total_lines, desc=f"Reading {filename}"):
+                        line = line.strip()
+                        if not line or line.startswith('#'):
+                            continue
+                        parts = line.split(sep)
+                        if len(parts) < 2:
+                            continue
+                        probe_id = parts[0]
+                        # Convert values to float32
+                        row_values = np.full(n_samples, np.nan, dtype=np.float32)
+                        for i, val in enumerate(parts[1:n_samples + 1]):
+                            try:
+                                row_values[i] = np.float32(val)
+                            except (ValueError, TypeError):
+                                row_values[i] = np.nan
+                        rows_list.append(row_values)
+                        probe_ids_list.append(probe_id)
+                        line_count += 1
+                        # Check estimated size periodically
+                        if line_count % 10000 == 0:
+                            current_bytes = len(rows_list) * n_samples * BYTES_PER_FLOAT32
+                            current_gb = current_bytes / (1024**3)
+                            if current_gb > MAX_MEMORY_GB:
+                                logger.warning(f"Methylation array size ({current_gb:.2f} GB) exceeds "
+                                             f"{MAX_MEMORY_GB} GB limit while reading {filename}. "
+                                             f"Stopping at {line_count} probes.")
+                                memory_exceeded = True
+                                break
+                if memory_exceeded:
+                    logger.warning(f"Partial data extracted from {filename} due to memory limit")
+                if rows_list:
+                    values = np.vstack(rows_list)
+                    probe_ids = pd.Index(probe_ids_list, name='probe_id')
+                    result = MethylationData(
+                        values=values,
+                        probe_ids=probe_ids,
+                        sample_ids=sample_ids
+                    )
+                    methylation_results.append(result)
+                    logger.info(f"Loaded methylation data from supplementary file: {filename} "
+                               f"({result.shape[0]} probes x {result.shape[1]} samples)")
+            except Exception as e:
+                logger.warning(f"Failed to load methylation data from {filename}: {e}")
+    # Combine results if multiple files
+    if methylation_results:
+        if len(methylation_results) == 1:
+            return methylation_results[0]
+        else:
+            # Combine multiple results - align by probe_id and concatenate samples
+            all_probes = sorted(set().union(*[set(r.probe_ids) for r in methylation_results]))
+            all_sample_ids = []
+            # Collect all sample columns
+            combined_values_list = []
+            for result in methylation_results:
+                if isinstance(result.sample_ids, pd.MultiIndex):
+                    all_sample_ids.extend(result.sample_ids.tolist())
+                else:
+                    all_sample_ids.extend(result.sample_ids.tolist())
+            n_total_samples = len(all_sample_ids)
+            # Check combined size
+            estimated_bytes = len(all_probes) * n_total_samples * BYTES_PER_FLOAT32
+            estimated_gb = estimated_bytes / (1024**3)
+            if estimated_gb > MAX_MEMORY_GB:
+                logger.warning(f"Combined methylation array size ({estimated_gb:.2f} GB) exceeds "
+                             f"{MAX_MEMORY_GB} GB limit. Returning first result only.")
+                return methylation_results[0]
+            # Build combined array
+            probe_to_idx = {p: i for i, p in enumerate(all_probes)}
+            combined_values = np.full((len(all_probes), n_total_samples), np.nan, dtype=np.float32)
+            sample_offset = 0
+            for result in methylation_results:
+                for probe_idx, probe_id in enumerate(result.probe_ids):
+                    if probe_id in probe_to_idx:
+                        combined_values[probe_to_idx[probe_id], 
+                                       sample_offset:sample_offset + result.shape[1]] = result.values[probe_idx, :]
+                sample_offset += result.shape[1]
+            # Determine sample_ids type
+            if any(isinstance(r.sample_ids, pd.MultiIndex) for r in methylation_results):
+                combined_sample_ids = pd.MultiIndex.from_tuples(all_sample_ids)
+            else:
+                combined_sample_ids = pd.Index(all_sample_ids, name='sample_id')
+            return MethylationData(
+                values=combined_values,
+                probe_ids=pd.Index(all_probes, name='probe_id'),
+                sample_ids=combined_sample_ids
+            )
+    return _create_empty_methylation_data()
 
 ##------------------------------------------------------------------------------------------------------##
 
@@ -220,7 +439,7 @@ def download_supplementary_files(gse: GEOparse.GEOTypes.GSE, gse_id: str,
 
 def acquire_methylation_studies(gse_ids: List[str], 
                                  destdir: str = "./geo_data",
-                                 download_supp: bool = False) -> Tuple[pd.DataFrame, Dict[str, pd.DataFrame], Dict[str, pd.DataFrame]]:
+                                 download_supp: bool = False) -> Tuple[pd.DataFrame, Dict[str, MethylationData], Dict[str, pd.DataFrame]]:
     """
     Acquire methylation data and metadata for multiple GSE studies.
     
@@ -232,11 +451,11 @@ def acquire_methylation_studies(gse_ids: List[str],
     Returns:
         Tuple of:
         - Combined metadata DataFrame
-        - Dictionary of methylation DataFrames per study
+        - Dictionary of MethylationData objects per study (float32 numpy arrays with indices)
         - Dictionary of platform annotations
     """
     all_metadata = []
-    all_methylation = {}
+    all_methylation: Dict[str, MethylationData] = {}
     all_platforms = {}
     for gse_id in gse_ids:
         try:
@@ -245,16 +464,16 @@ def acquire_methylation_studies(gse_ids: List[str],
             # Extract metadata
             metadata_df = extract_sample_metadata(gse, gse_id)
             all_metadata.append(metadata_df)
-            # Extract methylation data
-            methylation_df = extract_methylation_data(gse, gse_id)
-            if not methylation_df.empty:
-                all_methylation[gse_id] = methylation_df
-            # Extract platform annotations
-            platform_annot = get_platform_annotation(gse)
-            all_platforms.update(platform_annot)
             # Optionally download supplementary files
             if download_supp:
                 download_supplementary_files(gse, gse_id, destdir)
+            # Extract methylation data (which may be in supplementary files if not in GSM tables)
+            methylation_data = extract_methylation_data(gse, gse_id, destdir)
+            if not methylation_data.empty:
+                all_methylation[gse_id] = methylation_data
+            # Extract platform annotations
+            platform_annot = get_platform_annotation(gse)
+            all_platforms.update(platform_annot)
         except Exception as e:
             logger.error(f"Error processing {gse_id}: {e}")
             continue
