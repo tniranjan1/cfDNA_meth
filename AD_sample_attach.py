@@ -517,6 +517,71 @@ def main():
     print("\nPlatform annotations:")
     for platform_id, platform_df in platform_annotations.items():
         print(f"  {platform_id}: {platform_df.shape[0]} probes")
+    # Convert the methylation data to DataFrames for easier handling (optional, may use more memory)
+    tmp = {}
+    for gse_id, meth_data in methylation_data.items():
+        tmp[gse_id] = meth_data.to_dataframe()
+    methylation_data = tmp
+    # Remove duplicate columns in methylation data
+    for gse_id, meth_df in methylation_data.items():
+        if meth_df.columns.duplicated().any():
+            logger.warning(f"Duplicate columns found in methylation data for {gse_id}. Removing duplicates.")
+            methylation_data[gse_id] = meth_df.loc[:,~meth_df.columns.duplicated()]
+    # Convert sample IDs in methylation data to best matching in metadata
+    recurrency = {}
+    for column in metadata_df.columns:
+        if (column != 'gsm_id') and (column != 'gse_id'):
+            if len(set(metadata_df[column])) > 1:
+                recurrency[column] = metadata_df[column].str
+    for gse_id, meth_df in methylation_data.items():
+        # Find matching metadata rows for each methylation sample ID
+        matched_metadata_rows = {}
+        for i, sample_id in enumerate(meth_df.columns):
+            matched_metadata_rows[i] = []
+            if not isinstance(sample_id, tuple):
+                sample_id = tuple(sample_id)
+            for sample in sample_id:
+                # Try exact match first
+                metadata_row = metadata_df['gsm_id'] == sample
+                if metadata_row.any():
+                    matched_metadata_rows[i].extend(metadata_df[metadata_row]['gsm_id'].tolist())
+                    break  # Stop after first exact match
+                else:
+                    # If no exact match, try substring matching
+                    for col in recurrency.keys():
+                        metadata_row = metadata_df[recurrency[col].contains(sample, case=False, na=False)]
+                        if not metadata_row.empty:
+                            matched_metadata_rows[i].extend(metadata_row['gsm_id'].tolist())
+        # for each column in methylation data, select a single most frequent column name
+        matched_metadata_rows = { i: max(set(v), key=v.count) if v else None for i, v in matched_metadata_rows.items() }
+        # Update methylation data columns
+        new_columns = pd.Index([matched_metadata_rows.get(i, col) for i, col in enumerate(meth_df.columns)], name='gsm_id')
+        methylation_data[gse_id].columns = new_columns
+    # coorinate sample IDs between metadata and methylation data
+    if isinstance(methylation_data[list(methylation_data.keys())[0]].sample_ids, pd.MultiIndex):
+        methylation_sample_ids = set(methylation_data[list(methylation_data.keys())[0]].sample_ids.tolist())
+    else:
+        methylation_sample_ids = set(methylation_data[list(methylation_data.keys())[0]].sample_ids.tolist())
+    metadata_sample_ids = set(metadata_df['gsm_id'].tolist())
+    common_sample_ids = methylation_sample_ids.intersection(metadata_sample_ids)
+    if len(common_sample_ids) == len(methylation_sample_ids):
+        logger.info(f"Found {len(common_sample_ids)} common sample IDs between metadata and methylation data for {gse_id}")
+    else:
+        logger.warning(f"Only {len(common_sample_ids)} out of {len(methylation_sample_ids)} methylation sample IDs found in metadata for {gse_id}")
+        logger.warning(f"Searching for alternative matches...")
+        # Try matching by substring if sample IDs are not exact
+        matches: Dict[str, List[int]] = {}
+        for meth_sample_id in tqdm(list(methylation_sample_ids)):
+            for column in recurrency.keys():
+                if column != 'gsm_id':
+                    matching = recurrency[column].contains(meth_sample_id, case=False, na=False).values
+                    assert isinstance(matching, np.ndarray)
+                    matching = matching.nonzero()[0]
+                    if len(matching) > 0:
+                        if meth_sample_id not in matches:
+                            matches[meth_sample_id] = []
+                        matches[meth_sample_id] = matches[meth_sample_id] + matching.tolist()
+
     # Save metadata to CSV
     metadata_output = os.path.join(output_dir, "combined_sample_metadata.csv")
     metadata_df.to_csv(metadata_output, index=False)
