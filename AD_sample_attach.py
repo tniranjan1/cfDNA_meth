@@ -483,12 +483,130 @@ def acquire_methylation_studies(gse_ids: List[str],
 
 ##------------------------------------------------------------------------------------------------------##
 
+all_null_pheno = [ 'Demy_MS_Hipp', 'FCD', 'FCD1', 'FCD1A', 'FCD2', 'FCD2A', 'FCD2B', 'FCD3', 'FCD3A',
+                   'FCD3B', 'FCD3C', 'FCD3D', 'HME', 'MCD1', 'MCD3', 'MOGHE', 'MS', 'MS_Ctrl', 'mMCD',
+                   'MS_abnormal', 'MS_normal', 'My_MS_Hipp', 'PMG', 'TLE', 'TSC', 'epilepsy', 'isMS',
+                   'Control-TLE', 'Control-WM' ]
+
+all_one_pheno = [ 'non-FCD', 'non-MCD', 'non-MS', 'non-TLE', 'non-epilepsy'  ]
+
+def get_phenotypes(metadata_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Extract phenotypes from metadata for methylation data.
+    
+    Args:
+        metadata_df: Combined metadata DataFrame with 'gsm_id' column
+        methylation_data: Dictionary of MethylationData objects per study
+
+    Returns:
+        DataFrame of disease states for each sample
+    """
+    disease_states = {}
+    for idx, row in metadata_df.iterrows():
+        gsm_id = row['gsm_id']
+        # Extract disease state from characteristics
+        disease_state = row[['char_ad.disease.status', 'char_disease_status']]
+        is_control = disease_state.isin([ 'C', 'control']).any()
+        is_disease = disease_state.isin([ 'AD', "Alzheimer's disease" ]).any()
+        tissue_states = row[['char_tissue', 'char_source_tissue']]
+        is_blood = tissue_states.isin([ 'whole blood' ]).any()
+        is_neocortex = tissue_states.isin([ 'prefrontal cortex', 'frontal cortex' ]).any()
+        is_temporal_cortex = tissue_states.isin([ 'superior temporal gyrus' ]).any()
+        is_cerebellum = tissue_states.isin([ 'cerebellum' ]).any()
+        keep = False
+        keep = True if (is_control and (is_blood or is_cerebellum)) else keep
+        keep = True if (is_neocortex or is_temporal_cortex) else keep
+        if keep:
+            states = {}
+            states['Control-Cerebellum'] = int(is_control and is_cerebellum)
+            states['Control-NCx'] = int(is_control and (is_neocortex or is_temporal_cortex))
+            states['AD-NCx'] = int(is_disease and (is_neocortex or is_temporal_cortex))
+            states['Ctrl'] = int(is_control)
+            states['Disease'] = int(is_disease)
+            states['leukocyte'] = int(is_blood)
+            for pheno in all_null_pheno:
+                states[pheno] = 0
+            for pheno in all_one_pheno:
+                states[pheno] = 1
+            disease_states[gsm_id] = states
+    disease_states_df = pd.DataFrame.from_dict(disease_states, orient='index')
+    disease_states_df.index.name = 'gsm_id'
+    return disease_states_df
+
+##------------------------------------------------------------------------------------------------------##
+
+def load_probe_annotations(annotation_file: str) -> pd.DataFrame:
+    """
+    Load probe annotations from a BED file into a DataFrame.
+    
+    Args:
+        annotation_file: Path to the BED file containing probe annotations
+
+    Returns:
+        DataFrame with columns 'ID', 'CHR', 'START', 'END' for probe annotations
+    """
+    try:
+        annot_df = pd.read_csv(annotation_file, sep='\t', header=None, names=['CHR', 'START', 'END', 'ID'])
+        annot_df.index = annot_df['ID']
+        # remove rows with missing or invalid data
+        annot_df = annot_df.dropna(subset=['ID', 'CHR', 'START', 'END'])
+        annot_df = annot_df[annot_df['ID'].str.startswith(('cg', 'ch', 'rs'))]
+        # create LOCUS column
+        annot_df['LOCUS'] = annot_df['CHR'].astype(str) + '_' + \
+                            annot_df['START'].astype(int).astype(str) + '_' + \
+                            annot_df['END'].astype(int).astype(str)
+        logger.info(f"Loaded probe annotations from {annotation_file}: {annot_df.shape[0]} probes")
+        return annot_df[['ID', 'CHR', 'START', 'END', 'LOCUS']]
+    except Exception as e:
+        logger.error(f"Failed to load probe annotations from {annotation_file}: {e}")
+        return pd.DataFrame(columns=['ID', 'CHR', 'START', 'END', 'LOCUS'])
+
+##------------------------------------------------------------------------------------------------------##
+
+def convert_probes_to_hg38(methylation_data: Dict[str, MethylationData],
+                           probe_annotations: pd.DataFrame) -> None:
+    """
+    Convert probe IDs in methylation data to hg38 genomic positions using platform annotations.
+    Modifies methylation_data in place.
+
+    Args:
+        methylation_data: Dictionary of MethylationData objects per study
+        probe_annotations: DataFrame of probe annotations for all platforms
+
+    Returns:
+        None (modifies methylation_data in place)
+    """
+    for gse_id, meth_data in methylation_data.items():
+        # meth_data.probe_ids should have a match for most of probe_annotations.index
+        # for each id in meth_data.probe_ids, find corresponding LOCUS in probe_annotations or return the original id if not found
+        common_probes = meth_data.probe_ids.intersection(probe_annotations.index)
+        if common_probes.empty:
+            logger.warning(f"No common probes found between methylation data and annotations for {gse_id}. Skipping conversion.")
+            continue
+        # Create a mapping from probe ID to LOCUS
+        probe_to_locus = probe_annotations.loc[common_probes, 'LOCUS'].to_dict()
+        # Map probe IDs to LOCUS, keeping original ID if no annotation is found
+        new_probe_ids = meth_data.probe_ids.map(probe_to_locus)
+        meth_data.probe_ids = new_probe_ids
+        # remove columns in meth_data.values that have new_probe_ids as NaN (i.e. probes that were not mapped to hg38 positions)
+        valid_indices = meth_data.probe_ids.notna()
+        meth_data.values = meth_data.values[valid_indices,:]
+        meth_data.probe_ids = meth_data.probe_ids[valid_indices]
+        logger.info(f"Converted probe IDs to hg38 positions for {gse_id}: {len(common_probes)} probes mapped, {len(new_probe_ids) - len(common_probes)} removed due to missing annotations")
+
+##------------------------------------------------------------------------------------------------------##
+
+import pickle
+
 def main():
     """
     Main function to acquire GSE methylation studies.
     """
+    # Get hg38 prove annotations for Illumina 450K and EPIC arrays
+    probe_annotation_path = "/home/AD/tniranjan/Infinium/fromZhou/EPIC.hg38.bed"
+    probe_annotations = load_probe_annotations(probe_annotation_path)
     # Define the GSE studies to acquire
-    gse_studies = ["GSE59685", "GSE80970", "GSE43414"]
+    gse_studies = [ "GSE59685", "GSE80970", "GSE43414" ]
     # Set output directory
     output_dir = "/results/ep/study/hg38s/study250-cfDNA_prelim/cfDNA-MS/AD_reference"
     logger.info(f"Starting acquisition of {len(gse_studies)} GSE studies")
@@ -499,6 +617,19 @@ def main():
         destdir=output_dir,
         download_supp=True  # Download supplementary files with methylation matrices
     )
+    # sample ids to save and remove from older methylation data
+    sample_ids_to_save = set(metadata_df['gsm_id'].tolist())
+    # Retain relevant studies
+    methylation_data = { gse_id: meth_data for gse_id, meth_data in methylation_data.items() if gse_id in [ "GSE59685", "GSE80970" ] }
+    metadata_df = metadata_df[metadata_df['gse_id'].isin([ "GSE59685", "GSE80970" ])]
+    # For study GSE59685, use level 1 of sample IDs to match methylation with metadata
+    if "GSE59685" in methylation_data:
+        meth_data = methylation_data["GSE59685"]
+        if isinstance(meth_data.sample_ids, pd.MultiIndex):
+            new_sample_ids = meth_data.sample_ids.get_level_values(1)
+            methylation_data["GSE59685"].sample_ids = new_sample_ids
+    # Organize phenotype data
+    disease_states_df = get_phenotypes(metadata_df)
     # Display summary
     logger.info("\n" + "="*60)
     logger.info("ACQUISITION SUMMARY")
@@ -517,80 +648,39 @@ def main():
     print("\nPlatform annotations:")
     for platform_id, platform_df in platform_annotations.items():
         print(f"  {platform_id}: {platform_df.shape[0]} probes")
-    # Convert the methylation data to DataFrames for easier handling (optional, may use more memory)
-    tmp = {}
-    for gse_id, meth_data in methylation_data.items():
-        tmp[gse_id] = meth_data.to_dataframe()
-    methylation_data = tmp
-    # Remove duplicate columns in methylation data
-    for gse_id, meth_df in methylation_data.items():
-        if meth_df.columns.duplicated().any():
-            logger.warning(f"Duplicate columns found in methylation data for {gse_id}. Removing duplicates.")
-            methylation_data[gse_id] = meth_df.loc[:,~meth_df.columns.duplicated()]
-    # Convert sample IDs in methylation data to best matching in metadata
-    recurrency = {}
-    for column in metadata_df.columns:
-        if (column != 'gsm_id') and (column != 'gse_id'):
-            if len(set(metadata_df[column])) > 1:
-                recurrency[column] = metadata_df[column].str
-    for gse_id, meth_df in methylation_data.items():
-        # Find matching metadata rows for each methylation sample ID
-        matched_metadata_rows = {}
-        for i, sample_id in enumerate(meth_df.columns):
-            matched_metadata_rows[i] = []
-            if not isinstance(sample_id, tuple):
-                sample_id = tuple(sample_id)
-            for sample in sample_id:
-                # Try exact match first
-                metadata_row = metadata_df['gsm_id'] == sample
-                if metadata_row.any():
-                    matched_metadata_rows[i].extend(metadata_df[metadata_row]['gsm_id'].tolist())
-                    break  # Stop after first exact match
-                else:
-                    # If no exact match, try substring matching
-                    for col in recurrency.keys():
-                        metadata_row = metadata_df[recurrency[col].contains(sample, case=False, na=False)]
-                        if not metadata_row.empty:
-                            matched_metadata_rows[i].extend(metadata_row['gsm_id'].tolist())
-        # for each column in methylation data, select a single most frequent column name
-        matched_metadata_rows = { i: max(set(v), key=v.count) if v else None for i, v in matched_metadata_rows.items() }
-        # Update methylation data columns
-        new_columns = pd.Index([matched_metadata_rows.get(i, col) for i, col in enumerate(meth_df.columns)], name='gsm_id')
-        methylation_data[gse_id].columns = new_columns
-    # coorinate sample IDs between metadata and methylation data
-    if isinstance(methylation_data[list(methylation_data.keys())[0]].sample_ids, pd.MultiIndex):
-        methylation_sample_ids = set(methylation_data[list(methylation_data.keys())[0]].sample_ids.tolist())
-    else:
-        methylation_sample_ids = set(methylation_data[list(methylation_data.keys())[0]].sample_ids.tolist())
-    metadata_sample_ids = set(metadata_df['gsm_id'].tolist())
-    common_sample_ids = methylation_sample_ids.intersection(metadata_sample_ids)
-    if len(common_sample_ids) == len(methylation_sample_ids):
-        logger.info(f"Found {len(common_sample_ids)} common sample IDs between metadata and methylation data for {gse_id}")
-    else:
-        logger.warning(f"Only {len(common_sample_ids)} out of {len(methylation_sample_ids)} methylation sample IDs found in metadata for {gse_id}")
-        logger.warning(f"Searching for alternative matches...")
-        # Try matching by substring if sample IDs are not exact
-        matches: Dict[str, List[int]] = {}
-        for meth_sample_id in tqdm(list(methylation_sample_ids)):
-            for column in recurrency.keys():
-                if column != 'gsm_id':
-                    matching = recurrency[column].contains(meth_sample_id, case=False, na=False).values
-                    assert isinstance(matching, np.ndarray)
-                    matching = matching.nonzero()[0]
-                    if len(matching) > 0:
-                        if meth_sample_id not in matches:
-                            matches[meth_sample_id] = []
-                        matches[meth_sample_id] = matches[meth_sample_id] + matching.tolist()
-
+    # Convert methylation probes to hg38 positions
+    convert_probes_to_hg38(methylation_data, probe_annotations)
     # Save metadata to CSV
     metadata_output = os.path.join(output_dir, "combined_sample_metadata.csv")
     metadata_df.to_csv(metadata_output, index=False)
+    phenotypes_output = os.path.join(output_dir, "sample_phenotypes.csv")
+    disease_states_df.to_csv(phenotypes_output)
     logger.info(f"\nMetadata saved to: {metadata_output}")
-    # Save methylation data
-    for gse_id, meth_df in methylation_data.items():
-        meth_output = os.path.join(output_dir, f"{gse_id}_methylation.csv.gz")
-        meth_df.to_csv(meth_output, compression='gzip')
-        logger.info(f"Methylation data saved to: {meth_output}")
+    logger.info(f"Phenotypes saved to: {phenotypes_output}")
+    # Combine methylation data across studies into a single DataFrame for saving, ensuring column names match
+    combined_meth_df = None
+    for gse_id in set(metadata_df['gse_id']):
+        meth_data = methylation_data[gse_id]
+        meth_df = meth_data.to_dataframe()
+        meth_df = meth_df.transpose()  # samples as rows, probes as columns
+        # remove duplicate columns if any
+        meth_df = meth_df.loc[:,~meth_df.columns.duplicated()]
+        if combined_meth_df is None:
+            combined_meth_df = meth_df.copy()
+        else:
+            # Ensure column order matches existing DataFrame
+            common_cols = list(set(combined_meth_df.columns) & set(meth_df.columns))
+            if len(common_cols) == 0:
+                raise ValueError(f"No common columns found between {gse_id} and existing combined DataFrame")
+            combined_meth_df = combined_meth_df.reindex(columns=common_cols)
+            meth_df = meth_df.reindex(columns=common_cols)
+            combined_meth_df = pd.concat([combined_meth_df, meth_df], axis=0)
+    # Save combined methylation data
+    combined_output = os.path.join(output_dir, "combined_methylation.pkl")
+    assert combined_meth_df is not None, "No methylation data to save"
+    # save using pickle
+    pickle.dump((combined_meth_df, sample_ids_to_save), open(combined_output, 'wb'))
+    logger.info(f"Combined methylation data saved to: {combined_output}")
     return metadata_df, methylation_data, platform_annotations
 
 ##------------------------------------------------------------------------------------------------------##

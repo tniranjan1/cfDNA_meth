@@ -24,7 +24,8 @@ else:
     MS_beta = work_dir + "/MS_reference/MS_beta_values.txt"
     other_beta = work_dir + "/other_reference/other_beta_values.txt"
     blood_beta = work_dir + "/other_reference/blood_beta_values.txt"
-    beta_norm = mdi.get_methylation_data([MCD_beta, MS_beta, other_beta, blood_beta])
+    AD_beta = work_dir + "/AD_reference/combined_methylation.pkl"
+    beta_norm = mdi.get_methylation_data([MCD_beta, MS_beta, other_beta, blood_beta], [ AD_beta ])
     # store beta_norm for later use
     with open(work_dir + "/beta_norm.pkl", "wb") as f:
         pickle.dump(beta_norm, f)

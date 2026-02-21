@@ -1,3 +1,4 @@
+import pickle
 import pandas as pd
 import numpy as np
 from p_tqdm import p_map
@@ -117,23 +118,62 @@ def merge_methylation_datasets(datasets: list[pdDF]) -> pdDF:
 
 ##-----------------------------------------------------------------------------------------------##
 
-def get_methylation_data(filepaths: list[str]) -> pdDF:
+import pickle 
+
+def load_pickle_data(filepath: str) -> pdDF | tuple[pdDF, list]:
+    """
+    Load data from a pickle file.
+    
+    Args:
+        filepath (str): Path to the pickle file
+
+    Returns:
+        pd.DataFrame: Data loaded from the pickle file
+        tuple[pd.DataFrame, any]: Data and removals loaded from the pickle file if removals are present
+    """
+    removals = None
+    with open(filepath, "rb") as f:
+        data = pickle.load(f)
+    if isinstance(data, tuple):
+        data, removals = data
+        if isinstance(removals, set):
+            removals = list(removals)
+        assert isinstance(removals, list), "Removals should be a list or set"
+    if isinstance(data, pd.DataFrame):
+        data = process_methylation_data(data)
+    to_return = (data, removals) if removals is not None else data
+    return to_return
+
+##-----------------------------------------------------------------------------------------------##
+
+def get_methylation_data(filepaths: list[str], picklepaths: list[str] | None) -> tuple[pdDF, list]:
     """
     Load and merge multiple methylation datasets from filepaths.
     
     Args:
         filepaths (list of str): List of paths to methylation data files
+        picklepaths (list of str, optional): List of paths to precomputed pickle files
         
     Returns:
-        pd.DataFrame: Merged methylation dataset with common CpG sites
+        tuple[pd.DataFrame, list]: Merged methylation dataset with common CpG sites and list of removed samples
     """
     datasets = [load_methylation_data(fp) for fp in filepaths]
     merged_data = merge_methylation_datasets(datasets)
+    samples_removed = []
+    if picklepaths is not None:
+        for pp in picklepaths:
+            pickle_data = load_pickle_data(pp)
+            if isinstance(pickle_data, tuple):
+                pickle_data, sample_removals = pickle_data
+                samples_removed.extend(sample_removals)
+                merged_data = merged_data.drop(index=sample_removals, errors='ignore')
+            pickle_data = pickle_data[merged_data.columns]
+            merged_data = pd.concat([merged_data, pickle_data], axis=0)
     merged_min = merged_data.min(axis=0)
     merged_max = merged_data.max(axis=0)
     merged_data = (merged_data - merged_min) / (merged_max - merged_min)
     merged_data[merged_data.isna()] = 0
-    return merged_data
+    return merged_data, samples_removed
 
 ##-----------------------------------------------------------------------------------------------##
 
