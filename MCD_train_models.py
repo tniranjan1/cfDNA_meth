@@ -25,7 +25,8 @@ else:
     other_beta = work_dir + "/other_reference/other_beta_values.txt"
     blood_beta = work_dir + "/other_reference/blood_beta_values.txt"
     AD_beta = work_dir + "/AD_reference/combined_methylation.pkl"
-    beta_norm = mdi.get_methylation_data([MCD_beta, MS_beta, other_beta, blood_beta], [ AD_beta ])
+    txt_files = [ MCD_beta, MS_beta, other_beta, blood_beta ]
+    beta_norm, samples_removed = mdi.get_methylation_data(txt_files, [ AD_beta ])
     # store beta_norm for later use
     with open(work_dir + "/beta_norm.pkl", "wb") as f:
         pickle.dump(beta_norm, f)
@@ -46,6 +47,7 @@ else:
     MS_pheno_file = work_dir + "/MS_reference/MS_pheno_label.txt"
     other_pheno_file = work_dir + "/other_reference/other_pheno_label.txt"
     blood_pheno_file = work_dir + "/other_reference/blood_pheno_label.txt"
+    AD_pheno_file = work_dir + "/AD_reference/sample_phenotypes.csv"
     pheno_tables = {'MCD_pheno': mdi.load_phenotype_table(MCD_pheno_file),
                     'MS_pheno': mdi.load_phenotype_table(MS_pheno_file),
                     'other_pheno': mdi.load_phenotype_table(other_pheno_file),

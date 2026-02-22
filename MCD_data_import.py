@@ -160,15 +160,19 @@ def get_methylation_data(filepaths: list[str], picklepaths: list[str] | None) ->
     datasets = [load_methylation_data(fp) for fp in filepaths]
     merged_data = merge_methylation_datasets(datasets)
     samples_removed = []
+    multi_pickled = []
     if picklepaths is not None:
         for pp in picklepaths:
             pickle_data = load_pickle_data(pp)
             if isinstance(pickle_data, tuple):
                 pickle_data, sample_removals = pickle_data
                 samples_removed.extend(sample_removals)
-                merged_data = merged_data.drop(index=sample_removals, errors='ignore')
-            pickle_data = pickle_data[merged_data.columns]
-            merged_data = pd.concat([merged_data, pickle_data], axis=0)
+            multi_pickled.append(pickle_data)
+    if len(samples_removed) > 0:
+        merged_data = merged_data.drop(index=samples_removed, errors='ignore')
+    for pickle_data in multi_pickled:
+        pickle_data = pickle_data[merged_data.columns]
+        merged_data = pd.concat([merged_data, pickle_data], axis=0)
     merged_min = merged_data.min(axis=0)
     merged_max = merged_data.max(axis=0)
     merged_data = (merged_data - merged_min) / (merged_max - merged_min)
