@@ -413,7 +413,7 @@ def data_generator(current_label, beta_norm, combined_pheno_labels,
         exp_train_x, exp_train_t = zip(*pool.map(_data_augmentor_wrapper, items, chunksize=1))
         exp_train_x = np.vstack(exp_train_x).astype(nf16)
         exp_train_t = np.hstack(exp_train_t).astype(nf16)
-        exp_train_y = np.vstack([ np.tile(train_y[s,:], (4*d,1)) for s in range(len(train_y)) ]).astype(nf16)
+        exp_train_y = np.vstack([ np.tile(train_y[s,:], (3*d,1)) for s in range(len(train_y)) ]).astype(nf16)
         # Build weights with fraction-based adjustment (emphasize low-fraction samples)
         # Adjust this: 0=off, 1=linear, 2=quadratic
         exp_train_w = build_sample_weights(main_label, pd.Index(np.repeat(train_index, 3*d)),
@@ -423,7 +423,7 @@ def data_generator(current_label, beta_norm, combined_pheno_labels,
         exp_valid_x, exp_valid_t = zip(*pool.map(_data_augmentor_wrapper, items, chunksize=1))
         exp_valid_x = np.vstack(exp_valid_x).astype(nf16)
         exp_valid_t = np.hstack(exp_valid_t).astype(nf16)
-        exp_valid_y = np.vstack([ np.tile(valid_y[s,:], (4*d,1)) for s in range(len(valid_y)) ]).astype(nf16)
+        exp_valid_y = np.vstack([ np.tile(valid_y[s,:], (3*d,1)) for s in range(len(valid_y)) ]).astype(nf16)
         # Validation weights also fraction-adjusted for consistent evaluation
         exp_valid_w = build_sample_weights(main_label, pd.Index(np.repeat(valid_index, 3*d)),
                                            fractions=exp_valid_t, fraction_weight_power=1.0)
