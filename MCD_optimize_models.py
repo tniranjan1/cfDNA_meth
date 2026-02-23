@@ -146,7 +146,7 @@ def objective(trial: optuna.Trial, Xtrn, Ytrn, Wtrn, Ttrn, Xval, Yval, Wval, Tva
     The function performs the following steps:
     1. Sets random seeds for reproducibility across trials
     2. Suggests hyperparameters from predefined search spaces:
-        - proj_dim: projection layer dimension (categorical values: 16, 32)
+        - proj_dim: projection layer dimension (categorical values: 16, 32, 64)
         - l1_proj, l2_proj, l2_hidden: L1/L2 regularization coefficients (log-uniform ranges)
         - noise_std: standard deviation of Gaussian noise layer (log-uniform range)
         - dropout_proj, dropout_h1: dropout rates for projection and hidden layers
@@ -187,7 +187,7 @@ def objective(trial: optuna.Trial, Xtrn, Ytrn, Wtrn, Ttrn, Xval, Yval, Wval, Tva
     tf.random.set_seed(seed)
     np.random.seed(seed)
     # Search space
-    proj_dim     = trial.suggest_categorical("proj_dim", [ 16, 32 ])
+    proj_dim     = trial.suggest_categorical("proj_dim", [ 16, 32, 64 ])
     l1_proj      = trial.suggest_float("l1_proj", 1e-6, 1e-2, log=True)
     l2_proj      = trial.suggest_float("l2_proj", 1e-6, 1e-2, log=True)
     l2_hidden    = trial.suggest_float("l2_hidden", 1e-6, 1e-2, log=True)

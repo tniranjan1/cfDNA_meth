@@ -4,6 +4,10 @@ import MCD_data_import as mdi
 import warnings
 import pickle
 import os
+import MCD_data_generator as mdg
+from MCD_optimize_models import study_training
+import sys
+import datetime
 
 # disable pandas chained assignment warning (unnecessary for current df assignments)
 pd.options.mode.chained_assignment = None
@@ -109,11 +113,6 @@ beta_corrected = beta_corrected.loc[samples,:]
 combined_pheno_labels = combined_pheno_labels.loc[samples,:]
 
 ##-----------------------------------------------------------------------------------------------##
-
-import MCD_data_generator as mdg
-from MCD_optimize_models import study_training
-import sys
-import datetime
 
 # labels to use
 these_labels = mdg.construct_label_combos()
