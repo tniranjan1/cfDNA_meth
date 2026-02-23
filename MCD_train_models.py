@@ -66,10 +66,21 @@ else:
 ##-----------------------------------------------------------------------------------------------##
 
 # normalize for batch effects
-beta_corrected, batches = mdi.normalize_methylation_data(beta_norm, combined_pheno_labels)
-beta_norm_pca = mdi.run_pca(beta_corrected, n_components=5)
-beta_corrected_pca = mdi.run_pca(beta_corrected, n_components=5)
-
+if os.path.exists(work_dir + "/beta_corrected.pkl"):
+    with open(work_dir + "/beta_corrected.pkl", "rb") as f:
+        beta_corrected, tissues, gse_batches = pickle.load(f)
+else:
+    beta_corrected, batches = mdi.normalize_methylation_data(beta_norm, combined_pheno_labels)
+    tissues = batches['PhenoVal']
+    gse_batches = batches['GSM_start']
+    beta_norm_pca = mdi.run_pca(beta_norm, tissues, n_components=5)
+    beta_corrected_pca = mdi.run_pca(beta_corrected, tissues, n_components=5)
+    norm_pca_plot = work_dir + "/pca_plots/beta_norm_pca_plot.pdf"
+    corr_pca_plot = work_dir + "/pca_plots/beta_corrected_pca_plot.pdf"
+    mdi.plot_pca(beta_norm_pca, tissues, gse_batches, output_path=norm_pca_plot)
+    mdi.plot_pca(beta_corrected_pca, tissues, gse_batches, output_path=corr_pca_plot)
+    with open(work_dir + "/beta_corrected.pkl", "wb") as f:
+        pickle.dump([beta_corrected, tissues, gse_batches], f)
 
 ##-----------------------------------------------------------------------------------------------##
 
@@ -78,7 +89,7 @@ if os.path.exists(work_dir + "/keep.pkl"):
     with open(work_dir + "/keep.pkl", "rb") as f:
         keep = pickle.load(f)
 else:
-    keep = mdi.find_top_features(beta_norm, combined_pheno_labels)
+    keep = mdi.find_top_features(beta_corrected, combined_pheno_labels)
     # store keep for later use
     with open(work_dir + "/keep.pkl", "wb") as f:
         pickle.dump(keep, f)

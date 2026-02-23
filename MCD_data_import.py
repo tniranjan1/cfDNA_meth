@@ -298,6 +298,9 @@ def normalize_methylation_data(beta_norm: pdDF, combined_pheno_labels: pdDF) -> 
         batch_labels = batches.loc[batch_indices, 'GSM_start']
         # Get unique studies (batches) for this phenotype
         assert isinstance(batch_labels, pd.Series), "Batch GSM identifiers should be a Series"
+        if batch_labels.nunique() < 2:
+            print(f"Warning: Only one batch for phenotype {pheno} after excluding small batches. Skipping ComBat normalization for this phenotype.")
+            continue
         # Skip if only one batch
         for label, count in zip(*np.unique(batch_labels, return_counts=True)):
             if count < 2:
@@ -322,47 +325,93 @@ def normalize_methylation_data(beta_norm: pdDF, combined_pheno_labels: pdDF) -> 
 
 ##-----------------------------------------------------------------------------------------------##
 
-def run_pca(beta_norm: pdDF, n_components: int = 5) -> pdDF:
+def _run_single_tissue_pca(tissue: str, beta_norm: pdDF, tissues: pd.Series, n_components: int) -> tuple[str, pdDF]:
     """
-    Run PCA on methylation beta values for dimensionality reduction.
+    Helper function to run PCA for a single tissue type.
+    
+    Args:
+        tissue (str): Tissue type identifier
+        beta_norm (pd.DataFrame): Methylation beta values
+        tissues (pd.Series): Tissue type for each sample
+        n_components (int): Number of principal components
+        
+    Returns:
+        tuple: (tissue, pca_df)
+    """
+    from sklearn.decomposition import PCA
+    tissue_indices = tissues[tissues == tissue].index
+    tissue_data = beta_norm.loc[tissue_indices]
+    
+    pca = PCA(n_components=n_components)
+    pca_result = pca.fit_transform(tissue_data)
+    pca_df = pd.DataFrame(pca_result, index=tissue_data.index, 
+                         columns=[f'PC{i+1}' for i in range(n_components)])
+    return tissue, pca_df
+
+def run_pca(beta_norm: pdDF, tissues: pd.Series, n_components: int = 5, n_jobs: int = -1) -> dict[str, pdDF]:
+    """
+    Run PCA on methylation beta values for dimensionality reduction, separately for each tissue type.
+    Processes tissues in parallel.
     
     Args:
         beta_norm (pd.DataFrame): Methylation beta values to be reduced
+        tissues (pd.Series): Tissue type for each sample (index matches beta_norm)
         n_components (int): Number of principal components to keep
+        n_jobs (int): Number of parallel jobs (-1 uses all CPUs)
 
     Returns:
-        pd.DataFrame: PCA-transformed data with specified number of components
+        dict: Dictionary mapping tissue values to their PCA-transformed DataFrames
     """
-    from sklearn.decomposition import PCA
-    pca = PCA(n_components=n_components)
-    pca_result = pca.fit_transform(beta_norm)
-    pca_df = pd.DataFrame(pca_result, index=beta_norm.index, columns=[f'PC{i+1}' for i in range(n_components)])
-    return pca_df
+    from joblib import Parallel, delayed
+    unique_tissues = tissues.unique()
+    if len(unique_tissues) == 0:
+        return {}
+    results = Parallel(n_jobs=n_jobs)(
+        delayed(_run_single_tissue_pca)(tissue, beta_norm, tissues, n_components) 
+        for tissue in unique_tissues
+    )
+    assert results is not None, "PCA results should not be None"
+    return { key: value for key, value in results } # type: ignore
 
 ##-----------------------------------------------------------------------------------------------##
 
-def plot_pca(pca_df: pdDF, pheno_labels: pd.Series, batch_labels = pd.Series) -> None:
+def plot_pca(pca_dict: dict, pheno_labels: pd.Series, batch_labels: pd.Series,
+             output_path: str = "pca_plot.pdf") -> None:
     """
     Plot PCA results colored by batch labels and using unique symbols for pheno_labels.
+    Each tissue type is plotted on a separate PDF page.
     
     Args:
-        pca_df (pd.DataFrame): PCA-transformed data with principal components as columns
+        pca_dict (dict): Dictionary mapping tissue values to PCA-transformed DataFrames
         pheno_labels (pd.Series): Phenotype labels for coloring the PCA plot
         batch_labels (pd.Series): Batch labels for coloring the PCA plot
+        output_path (str): Path to save the output PDF file
     
     Returns:
-        None: Displays the PCA plot
+        None: Saves plots to PDF file
     """
     import matplotlib.pyplot as plt
     import seaborn as sns
-    plt.figure(figsize=(12, 6))
-    # PCA colored by batch_label
-    # PCA markers determined by pheno_labels
-    # Use seaborn pairplot for better aesthetics, with each row/column comparing different PCs
-    pca_df['batch'] = batch_labels
-    pca_df['pheno'] = pheno_labels
-    sns.pairplot(pca_df, hue='batch', markers='pheno', diag_kind='kde', plot_kws={'alpha': 0.7})
-    plt.suptitle('PCA of Methylation Data Colored by Batch and Shaped by Phenotype', y=1.02)
-    plt.show()
+    import os
+    from matplotlib.backends.backend_pdf import PdfPages
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    # Fixed tissue_val to tissue order
+    tissue_dict = { 0: 'NCx', 1: 'Cerebellum', 2: 'WM', 4: 'Hippo', 8: 'Blood' }
+    # Create a PDF with multiple pages
+    with PdfPages(output_path) as pdf:
+        for tissue_val in pca_dict:
+            tissue_indices = pca_dict[tissue_val].index
+            pca_df = pca_dict[tissue_val].copy()
+            tissue_batch_labels = batch_labels.loc[tissue_indices]
+            tissue_pheno_labels = pheno_labels.loc[tissue_indices]
+            pca_df['batch'] = tissue_batch_labels
+            pca_df['pheno'] = tissue_pheno_labels
+            # Create pairplot for this tissue
+            g = sns.pairplot(pca_df, hue='batch', diag_kind='kde', plot_kws={'alpha': 0.7})
+            g.fig.suptitle(f'PCA of Methylation Data Colored by Batch for Tissue {tissue_dict[tissue_val]}', y=1.02)
+            # Save figure to PDF page
+            pdf.savefig(g.fig, bbox_inches='tight')
+            plt.close(g.fig)
+    print(f"PCA plot saved to: {output_path}")
 
 ##-----------------------------------------------------------------------------------------------##
