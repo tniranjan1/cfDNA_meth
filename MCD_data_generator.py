@@ -425,7 +425,7 @@ def data_generator(current_label, beta_norm, combined_pheno_labels,
         exp_valid_t = np.hstack(exp_valid_t).astype(nf16)
         exp_valid_y = np.vstack([ np.tile(valid_y[s,:], (4*d,1)) for s in range(len(valid_y)) ]).astype(nf16)
         # Validation weights also fraction-adjusted for consistent evaluation
-        exp_valid_w = build_sample_weights(main_label, pd.Index(np.repeat(valid_index, 4*d)),
+        exp_valid_w = build_sample_weights(main_label, pd.Index(np.repeat(valid_index, 3*d)),
                                            fractions=exp_valid_t, fraction_weight_power=1.0)
     # print a comparison between the sample label distributions between
     #   exp_train_y and exp_valid_y
