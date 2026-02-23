@@ -119,7 +119,8 @@ import datetime
 these_labels = mdg.construct_label_combos()
 train_size = mdg.get_training_sizes()
 # max valid number of samples per label
-max_allowed, max_valid = mdg.get_allowed_sizes(these_labels, train_size, combined_pheno_labels,max_size=60)
+max_allowed, max_valid = mdg.get_allowed_sizes(these_labels, train_size, combined_pheno_labels,
+                                               max_size=60)
 
 studies = {}
 BATCH_SIZE = 64
