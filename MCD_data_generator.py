@@ -352,7 +352,6 @@ def _data_augmentor_wrapper(args):
 
 ##-----------------------------------------------------------------------------------------------##
 
-import tensorflow as tf
 nf16 = np.float16
 
 def data_generator(current_label, beta_norm, combined_pheno_labels,
