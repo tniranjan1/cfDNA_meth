@@ -18,7 +18,7 @@ work_dir = '/results/ep/study/hg38s/study250-cfDNA_prelim/cfDNA-MS'
 # check if beta_norm.pkl exists
 if os.path.exists(work_dir + "/beta_norm.pkl"):
     with open(work_dir + "/beta_norm.pkl", "rb") as f:
-        beta_norm = pickle.load(f)
+        beta_norm, samples_removed = pickle.load(f)
 else:
     MCD_beta = work_dir + "/MCD_reference/beta_values.txt"
     MS_beta = work_dir + "/MS_reference/MS_beta_values.txt"
@@ -29,7 +29,7 @@ else:
     beta_norm, samples_removed = mdi.get_methylation_data(txt_files, [ AD_beta ])
     # store beta_norm for later use
     with open(work_dir + "/beta_norm.pkl", "wb") as f:
-        pickle.dump(beta_norm, f)
+        pickle.dump([beta_norm, samples_removed], f)
 
 # convert beta_norm to float16 to save memory
 beta_norm = beta_norm.astype('float16')
@@ -53,9 +53,20 @@ else:
                     'other_pheno': mdi.load_phenotype_table(other_pheno_file),
                     'blood_pheno': mdi.load_phenotype_table(blood_pheno_file)}
     combined_pheno_labels = mdi.customize_and_merge_phenotype_labels(**pheno_tables)
+    # remove samples from combined_pheno_labels that were removed from beta_norm
+    combined_pheno_labels = combined_pheno_labels.drop(index=samples_removed, errors='ignore')
+    AD_pheno_table = pd.read_csv(AD_pheno_file, index_col=0)
+    # customize AD pheno labels to match combined_pheno_labels format
+    AD_pheno_table = AD_pheno_table.reindex(columns=combined_pheno_labels.columns, fill_value=0)
+    combined_pheno_labels = pd.concat([combined_pheno_labels, AD_pheno_table])
     # store combined_pheno_labels for later use
     with open(work_dir + "/combined_pheno_labels.pkl", "wb") as f:
         pickle.dump(combined_pheno_labels, f)
+
+##-----------------------------------------------------------------------------------------------##
+
+# normalize for batch effects
+beta_norm = mdi.normalize_methylation_data(beta_norm, combined_pheno_labels)
 
 ##-----------------------------------------------------------------------------------------------##
 

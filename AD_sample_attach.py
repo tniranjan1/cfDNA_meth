@@ -675,6 +675,9 @@ def main():
             combined_meth_df = combined_meth_df.reindex(columns=common_cols)
             meth_df = meth_df.reindex(columns=common_cols)
             combined_meth_df = pd.concat([combined_meth_df, meth_df], axis=0)
+    # Restrict combined methylation data to samples present in disease_states_df
+    assert isinstance(combined_meth_df, pd.DataFrame), "Combined methylation data is not a DataFrame"
+    combined_meth_df = combined_meth_df.loc[combined_meth_df.index.isin(disease_states_df.index)]
     # Save combined methylation data
     combined_output = os.path.join(output_dir, "combined_methylation.pkl")
     assert combined_meth_df is not None, "No methylation data to save"

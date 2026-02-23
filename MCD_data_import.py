@@ -157,7 +157,9 @@ def get_methylation_data(filepaths: list[str], picklepaths: list[str] | None) ->
     Returns:
         tuple[pd.DataFrame, list]: Merged methylation dataset with common CpG sites and list of removed samples
     """
-    datasets = [load_methylation_data(fp) for fp in filepaths]
+    from multiprocessing import Pool
+    with Pool(processes=min(12, len(filepaths))) as pool:
+        datasets = pool.map(load_methylation_data, filepaths)
     merged_data = merge_methylation_datasets(datasets)
     samples_removed = []
     multi_pickled = []
@@ -171,13 +173,16 @@ def get_methylation_data(filepaths: list[str], picklepaths: list[str] | None) ->
     if len(samples_removed) > 0:
         merged_data = merged_data.drop(index=samples_removed, errors='ignore')
     for pickle_data in multi_pickled:
-        pickle_data = pickle_data[merged_data.columns]
+        common_sites = merged_data.columns.intersection(pickle_data.columns)
+        merged_data = merged_data[common_sites]
+        pickle_data = pickle_data[common_sites]
         merged_data = pd.concat([merged_data, pickle_data], axis=0)
-    merged_min = merged_data.min(axis=0)
-    merged_max = merged_data.max(axis=0)
-    merged_data = (merged_data - merged_min) / (merged_max - merged_min)
+#    merged_min = merged_data.min(axis=0)
+#    merged_max = merged_data.max(axis=0)
+#    merged_data = (merged_data - merged_min) / (merged_max - merged_min)
     merged_data[merged_data.isna()] = 0
-    return merged_data, samples_removed
+    return 
+
 
 ##-----------------------------------------------------------------------------------------------##
 
@@ -256,5 +261,58 @@ def find_top_features(beta_values: pdDF, phenotype_labels: pdDF) -> np.ndarray:
     hold = p_map(fstat, phenotype_labels.columns.tolist(), num_cpus=6)
     keep = (np.vstack(hold).sum(axis=0) > 0) + 0
     return keep
+
+##-----------------------------------------------------------------------------------------------##
+
+from inmoose.pycombat import pycombat
+
+def normalize_methylation_data(beta_norm: pdDF, combined_pheno_labels: pdDF) -> pdDF:
+    """
+    Normalize methylation beta values for batch effects.
+    
+    Args:
+        beta_norm (pd.DataFrame): Methylation beta values to be normalized
+        combined_pheno_labels (pd.DataFrame): Combined phenotype labels for batch information
+
+    Returns:
+        pd.DataFrame: Normalized methylation beta values
+    """
+    rep_cols = [ 'Control-Cerebellum', 'Control-WM', 'Demy_MS_Hipp', 'MS', 'MS_Ctrl',
+                 'MS_abnormal', 'My_MS_Hipp', 'leukocyte' ]
+    batches =[]
+    for b in beta_norm.index:
+        vals = combined_pheno_labels.loc[b, rep_cols] * np.array([1, 2, 4, 2, 2, 2, 4, 8])
+        vals = vals[vals > 0]
+        if len(vals) == 0:
+            vals = 0
+        else:
+            vals = max(set(list(vals)), key=list(vals).count)
+        batch = (b[:6], vals)
+        batches.append(batch)
+    batches = pd.DataFrame(batches, index=beta_norm.index, columns=['GSM_start', 'PhenoVal'])
+    # Create a copy for normalized output
+    beta_corrected = beta_norm.copy()
+    for pheno in set(batches['PhenoVal']):
+        batch_indices = batches[batches['PhenoVal'] == pheno].index
+        batch_data = beta_norm.loc[batch_indices]
+        batch_labels = batches.loc[batch_indices, 'GSM_start']
+        # Get unique studies (batches) for this phenotype
+        assert isinstance(batch_labels, pd.Series), "Batch GSM identifiers should be a Series"
+        # Skip if only one batch
+        if batch_labels.nunique() <= 1:
+            continue
+        # ComBat expects features (CpG sites) as rows, samples as columns
+        # Transpose: (samples x CpG) -> (CpG x samples)
+        data_for_combat = batch_data.T
+        # Run ComBat - it models batch effects with an empirical Bayes approach
+        # that shares information across probes
+        corrected_data = pycombat(data_for_combat, batch_labels.values)
+        # Transpose back: (CpG x samples) -> (samples x CpG)
+        beta_corrected.loc[batch_indices] = corrected_data.T
+    # Clip to valid beta range [0, 1]
+    beta_corrected = beta_corrected.clip(0, 1)
+    return beta_corrected
+
+
 
 ##-----------------------------------------------------------------------------------------------##
