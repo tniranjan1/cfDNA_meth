@@ -416,7 +416,7 @@ def data_generator(current_label, beta_norm, combined_pheno_labels,
         exp_train_y = np.vstack([ np.tile(train_y[s,:], (4*d,1)) for s in range(len(train_y)) ]).astype(nf16)
         # Build weights with fraction-based adjustment (emphasize low-fraction samples)
         # Adjust this: 0=off, 1=linear, 2=quadratic
-        exp_train_w = build_sample_weights(main_label, pd.Index(np.repeat(train_index, 4*d)),
+        exp_train_w = build_sample_weights(main_label, pd.Index(np.repeat(train_index, 3*d)),
                                            fractions=exp_train_t, fraction_weight_power=1.0)
         # Augment validation data
         items = tqdm([ (valid_x[s,:], d) for s in range(len(valid_x))], desc="Augment validation")
