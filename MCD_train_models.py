@@ -151,6 +151,8 @@ def _train_label_study(label, data_dict, f_out) -> tuple:
             sys.stdout = f            
             # Retrieve pre-generated data dict for this label
             # Train study and return result
+            model_save_dir = work_dir + f"/model_training/study_{l_name}_models"
+            data_dict['model_save_dir'] = model_save_dir
             study_result = study_training(**data_dict)
             print(f"Completed training study for label combo: {l_name}")
             return label, study_result
@@ -164,7 +166,7 @@ import time
 import gc
 
 # Loop through label combinations and train models in parallel (2-3 at a time)
-n_processes = 6  # Number of labels to train simultaneously
+n_processes = 12  # Number of labels to train simultaneously
 pending_results = []  # Queue to track pending async results (max n_processes)
 
 with Pool(processes=n_processes) as pool:
@@ -203,7 +205,7 @@ with Pool(processes=n_processes) as pool:
                 sys.stdout = f
                 print(f"Generating data for label combo: {l_name}")
                 # Generate data dict for this label combo (sequential in main process)
-                data_dict = mdg.data_generator(label, beta_norm, combined_pheno_labels, keep,
+                data_dict = mdg.data_generator(label, beta_corrected, combined_pheno_labels, keep,
                                                max_allowed, max_valid, these_labels, BATCH_SIZE)
                 data_dict['BATCH_SIZE'] = BATCH_SIZE
                 data_dict['singleton'] = True  # simulate single-read sampling

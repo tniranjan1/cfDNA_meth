@@ -135,7 +135,7 @@ class FractionAUCPRCallback(tf.keras.callbacks.Callback):
 ##-----------------------------------------------------------------------------------------------##
 
 def objective(trial: optuna.Trial, Xtrn, Ytrn, Wtrn, Ttrn, Xval, Yval, Wval, Tval, 
-              singleton=False, BATCH_SIZE=128) -> float:
+              singleton=False, BATCH_SIZE=128, model_save_dir: str | None = None) -> float:
     """
     Objective function for Optuna hyperparameter optimization of a methylation classification model.
 
@@ -170,6 +170,7 @@ def objective(trial: optuna.Trial, Xtrn, Ytrn, Wtrn, Ttrn, Xval, Yval, Wval, Tva
         Yval_raw (np.ndarray): Raw validation labels for per-fraction AUC-PR computation
         singleton (bool): Whether to use singleton mode (affects data augmentation)
         BATCH_SIZE (int): Batch size for training
+        model_save_dir (str): Directory to save the trained model for this trial (optional)
 
     Returns:
         float: The validation PR AUC score (or negative validation loss as fallback) to be
@@ -255,6 +256,11 @@ def objective(trial: optuna.Trial, Xtrn, Ytrn, Wtrn, Ttrn, Xval, Yval, Wval, Tva
                         use_multiprocessing=True,
                         workers=10,
                         max_queue_size=10)
+    # Save model for this trial (optional, can be commented out to save disk space)
+    if model_save_dir is not None:
+        os.makedirs(model_save_dir, exist_ok=True)
+        model_path = os.path.join(model_save_dir, f"trial_{trial.number}_model.h5")
+        model.save(model_path)
     # Clean up memory
     del model
     gc.collect()
@@ -272,8 +278,11 @@ def objective(trial: optuna.Trial, Xtrn, Ytrn, Wtrn, Ttrn, Xval, Yval, Wval, Tva
 
 ##-----------------------------------------------------------------------------------------------##
 
+from typing import Optional
+
 def study_training(Xtrn, Ytrn, Wtrn, Ttrn, Xval, Yval, Wval, Tval,
-                   singleton=False, BATCH_SIZE=128) -> optuna.Study:
+                   singleton=False, BATCH_SIZE=128,
+                   model_save_dir: Optional[str] = None) -> optuna.Study:
     """
     Conduct hyperparameter optimization study using Optuna.
 
@@ -288,6 +297,7 @@ def study_training(Xtrn, Ytrn, Wtrn, Ttrn, Xval, Yval, Wval, Tval,
         Tval (np.ndarray): Validation spike-in fractions
         singleton (bool): Whether to use singleton mode (affects data augmentation)
         BATCH_SIZE (int): Batch size for training
+        model_save_dir (str): Directory to save trained models for each trial (optional)
 
     Returns:
         optuna.Study: The completed Optuna study object containing optimization results.
@@ -298,10 +308,11 @@ def study_training(Xtrn, Ytrn, Wtrn, Ttrn, Xval, Yval, Wval, Tval,
     study.optimize(lambda trial:
                    objective(trial, Xtrn, Ytrn, Wtrn, Ttrn,
                              Xval, Yval, Wval, Tval,
-                             singleton, BATCH_SIZE), 
+                             singleton, BATCH_SIZE, model_save_dir=model_save_dir), 
                    n_trials=40, timeout=None)
     print("Best value:", study.best_value)
     print("Best params:", study.best_params)
+    print("Best trial:", study.best_trial)
     return study
 
 ##-----------------------------------------------------------------------------------------------##
