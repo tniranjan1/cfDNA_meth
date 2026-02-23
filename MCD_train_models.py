@@ -66,7 +66,10 @@ else:
 ##-----------------------------------------------------------------------------------------------##
 
 # normalize for batch effects
-beta_norm = mdi.normalize_methylation_data(beta_norm, combined_pheno_labels)
+beta_corrected, batches = mdi.normalize_methylation_data(beta_norm, combined_pheno_labels)
+beta_norm_pca = mdi.run_pca(beta_corrected, n_components=5)
+beta_corrected_pca = mdi.run_pca(beta_corrected, n_components=5)
+
 
 ##-----------------------------------------------------------------------------------------------##
 

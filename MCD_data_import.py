@@ -181,8 +181,7 @@ def get_methylation_data(filepaths: list[str], picklepaths: list[str] | None) ->
 #    merged_max = merged_data.max(axis=0)
 #    merged_data = (merged_data - merged_min) / (merged_max - merged_min)
     merged_data[merged_data.isna()] = 0
-    return 
-
+    return merged_data, samples_removed
 
 ##-----------------------------------------------------------------------------------------------##
 
@@ -264,9 +263,9 @@ def find_top_features(beta_values: pdDF, phenotype_labels: pdDF) -> np.ndarray:
 
 ##-----------------------------------------------------------------------------------------------##
 
-from inmoose.pycombat import pycombat
+from inmoose import pycombat
 
-def normalize_methylation_data(beta_norm: pdDF, combined_pheno_labels: pdDF) -> pdDF:
+def normalize_methylation_data(beta_norm: pdDF, combined_pheno_labels: pdDF) -> tuple[pdDF, pdDF]:
     """
     Normalize methylation beta values for batch effects.
     
@@ -276,6 +275,7 @@ def normalize_methylation_data(beta_norm: pdDF, combined_pheno_labels: pdDF) -> 
 
     Returns:
         pd.DataFrame: Normalized methylation beta values
+        pd.DataFrame: Batch information for each sample
     """
     rep_cols = [ 'Control-Cerebellum', 'Control-WM', 'Demy_MS_Hipp', 'MS', 'MS_Ctrl',
                  'MS_abnormal', 'My_MS_Hipp', 'leukocyte' ]
@@ -299,20 +299,70 @@ def normalize_methylation_data(beta_norm: pdDF, combined_pheno_labels: pdDF) -> 
         # Get unique studies (batches) for this phenotype
         assert isinstance(batch_labels, pd.Series), "Batch GSM identifiers should be a Series"
         # Skip if only one batch
-        if batch_labels.nunique() <= 1:
-            continue
+        for label, count in zip(*np.unique(batch_labels, return_counts=True)):
+            if count < 2:
+                assert isinstance(batch_labels, pd.Series), "Batch GSM identifiers should be a Series"
+                label_indices = batch_labels[batch_labels == label]
+                batch_indices = batch_indices[batch_labels != label]
+                batch_data = beta_norm.loc[batch_indices]
+                batch_labels = batches.loc[batch_indices, 'GSM_start']
+                print(f"Warning: Only one sample in batch {label} for phenotype {pheno}. Excluding {len(label_indices)} sample(s) from ComBat normalization.")
         # ComBat expects features (CpG sites) as rows, samples as columns
         # Transpose: (samples x CpG) -> (CpG x samples)
         data_for_combat = batch_data.T
         # Run ComBat - it models batch effects with an empirical Bayes approach
         # that shares information across probes
-        corrected_data = pycombat(data_for_combat, batch_labels.values)
+        assert isinstance(batch_labels, pd.Series), "Batch GSM identifiers should be a Series"
+        corrected_data = pycombat.pycombat_norm(data_for_combat, batch_labels.values)
         # Transpose back: (CpG x samples) -> (samples x CpG)
         beta_corrected.loc[batch_indices] = corrected_data.T
     # Clip to valid beta range [0, 1]
     beta_corrected = beta_corrected.clip(0, 1)
-    return beta_corrected
+    return beta_corrected, batches
 
+##-----------------------------------------------------------------------------------------------##
 
+def run_pca(beta_norm: pdDF, n_components: int = 5) -> pdDF:
+    """
+    Run PCA on methylation beta values for dimensionality reduction.
+    
+    Args:
+        beta_norm (pd.DataFrame): Methylation beta values to be reduced
+        n_components (int): Number of principal components to keep
+
+    Returns:
+        pd.DataFrame: PCA-transformed data with specified number of components
+    """
+    from sklearn.decomposition import PCA
+    pca = PCA(n_components=n_components)
+    pca_result = pca.fit_transform(beta_norm)
+    pca_df = pd.DataFrame(pca_result, index=beta_norm.index, columns=[f'PC{i+1}' for i in range(n_components)])
+    return pca_df
+
+##-----------------------------------------------------------------------------------------------##
+
+def plot_pca(pca_df: pdDF, pheno_labels: pd.Series, batch_labels = pd.Series) -> None:
+    """
+    Plot PCA results colored by batch labels and using unique symbols for pheno_labels.
+    
+    Args:
+        pca_df (pd.DataFrame): PCA-transformed data with principal components as columns
+        pheno_labels (pd.Series): Phenotype labels for coloring the PCA plot
+        batch_labels (pd.Series): Batch labels for coloring the PCA plot
+    
+    Returns:
+        None: Displays the PCA plot
+    """
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    plt.figure(figsize=(12, 6))
+    # PCA colored by batch_label
+    # PCA markers determined by pheno_labels
+    # Use seaborn pairplot for better aesthetics, with each row/column comparing different PCs
+    pca_df['batch'] = batch_labels
+    pca_df['pheno'] = pheno_labels
+    sns.pairplot(pca_df, hue='batch', markers='pheno', diag_kind='kde', plot_kws={'alpha': 0.7})
+    plt.suptitle('PCA of Methylation Data Colored by Batch and Shaped by Phenotype', y=1.02)
+    plt.show()
 
 ##-----------------------------------------------------------------------------------------------##

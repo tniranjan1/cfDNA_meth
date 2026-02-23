@@ -194,7 +194,7 @@ def extract_methylation_data(gse: GEOparse.GEOTypes.GSE, gse_id: str,
     for sample_idx, sample_name in tqdm(enumerate(sample_names), total=n_samples, desc=f"Processing samples for {gse_id}"):
         table = sample_tables[sample_name]
         table_as_series = pd.Series(data=table['VALUE'].values, index=table['ID_REF'].values)
-        values[:,sample_idx] = table_as_series[probe_id_to_index].values.astype(np.float32)
+        values[:,sample_idx] = table_as_series[probe_id_to_index].to_numpy().astype(np.float32)
     probe_ids = pd.Index(probe_id_to_index.values, name='probe_id')
     sample_ids = pd.Index(sample_names, name='sample_id')
     return MethylationData(values=values, probe_ids=probe_ids, sample_ids=sample_ids)
