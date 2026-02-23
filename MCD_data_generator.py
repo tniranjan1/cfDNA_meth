@@ -11,16 +11,17 @@ def construct_label_combos() -> list:
     fcd_subtypes = [ 'FCD1A', 'FCD2A', 'FCD2B', 'FCD3A', 'FCD3B', 'FCD3C', 'FCD3D' ]
     mcd_other = [ 'HME', 'MOGHE', 'PMG', 'TSC', 'mMCD' ]
     ms_subtypes = [ 'Demy_MS_Hipp', 'My_MS_Hipp', 'MS' ]
+    ad_subtypes = [ 'AD-NCx' ]
     labels = []
 #    labels.append(ctrls + fcd_subtypes + mcd_other + ms_subtypes + ['TLE', 'leukocyte'])
-    labels.append([ 'Ctrl', 'Disease' ])
+#    labels.append([ 'Ctrl', 'Disease' ])
     labels.append([ 'Ctrl' ])
     labels.append([ 'Disease' ])
-    labels.append([ 'FCD', 'non-FCD' ])
+#    labels.append([ 'FCD', 'non-FCD' ])
     labels.append([ 'FCD' ])
     labels.append([ 'non-FCD' ])
-    labels.append([ 'FCD1A', 'FCD2', 'FCD3', 'non-FCD' ])
-    labels.append(fcd_subtypes + ['non-FCD'])
+#    labels.append([ 'FCD1A', 'FCD2', 'FCD3', 'non-FCD' ])
+#    labels.append(fcd_subtypes + ['non-FCD'])
     labels.append([ 'FCD1A' ])
     labels.append([ 'FCD2' ])
     labels.append([ 'FCD3' ])
@@ -31,11 +32,11 @@ def construct_label_combos() -> list:
     labels.append([ 'FCD3C' ])
     labels.append([ 'FCD3D' ])
     labels = labels + [ [ m ] for m in mcd_other ]
-    labels.append([ 'MCD1', 'MCD3', 'non-MCD' ])
+#    labels.append([ 'MCD1', 'MCD3', 'non-MCD' ])
     labels.append([ 'MCD1' ])
     labels.append([ 'MCD3' ])
     labels.append([ 'non-MCD' ])
-    labels.append([ 'TLE', 'non-TLE' ])
+#    labels.append([ 'TLE', 'non-TLE' ])
     labels.append([ 'TLE' ])
     labels.append([ 'non-TLE' ])
     labels.append([ 'isMS', 'non-MS' ])
@@ -46,9 +47,10 @@ def construct_label_combos() -> list:
     labels.append([ 'Demy_MS_Hipp' ])
     labels.append([ 'My_MS_Hipp' ])
     labels.append([ 'leukocyte' ])
-    labels.append([ 'epilepsy', 'non-epilepsy' ])
+#    labels.append([ 'epilepsy', 'non-epilepsy' ])
     labels.append([ 'epilepsy' ])
     labels.append([ 'non-epilepsy' ])
+    labels.append([ 'AD-NCx' ])
     return labels
 
 ##-----------------------------------------------------------------------------------------------##
@@ -96,7 +98,8 @@ def get_training_sizes() -> dict:
                    'MS_abnormal'        :  21,
                    'leukocyte'          :  49,
                    'epilepsy'           :  160, # 279,
-                   'non-epilepsy'       :  160 }
+                   'non-epilepsy'       :  160,
+                   'AD-NCx'             :  160 }
     return train_size
 
 ##-----------------------------------------------------------------------------------------------##

@@ -56,8 +56,10 @@ else:
     # remove samples from combined_pheno_labels that were removed from beta_norm
     combined_pheno_labels = combined_pheno_labels.drop(index=samples_removed, errors='ignore')
     AD_pheno_table = pd.read_csv(AD_pheno_file, index_col=0)
+    union_columns = combined_pheno_labels.columns.union(AD_pheno_table.columns)
     # customize AD pheno labels to match combined_pheno_labels format
-    AD_pheno_table = AD_pheno_table.reindex(columns=combined_pheno_labels.columns, fill_value=0)
+    AD_pheno_table = AD_pheno_table.reindex(columns=union_columns, fill_value=0)
+    combined_pheno_labels = combined_pheno_labels.reindex(columns=union_columns, fill_value=0)
     combined_pheno_labels = pd.concat([combined_pheno_labels, AD_pheno_table])
     # store combined_pheno_labels for later use
     with open(work_dir + "/combined_pheno_labels.pkl", "wb") as f:
@@ -84,6 +86,7 @@ else:
 
 ##-----------------------------------------------------------------------------------------------##
 
+beta_corrected = beta_corrected.loc[combined_pheno_labels.index,:]
 # get top feature vector
 if os.path.exists(work_dir + "/keep.pkl"):
     with open(work_dir + "/keep.pkl", "rb") as f:
@@ -102,7 +105,7 @@ import random
 random.seed(42)
 samples = combined_pheno_labels.index.tolist()
 random.shuffle(samples)
-beta_norm = beta_norm.loc[samples,:]
+beta_corrected = beta_corrected.loc[samples,:]
 combined_pheno_labels = combined_pheno_labels.loc[samples,:]
 
 ##-----------------------------------------------------------------------------------------------##
@@ -120,6 +123,7 @@ max_allowed, max_valid = mdg.get_allowed_sizes(these_labels, train_size, combine
 
 studies = {}
 BATCH_SIZE = 64
+
 ##-----------------------------------------------------------------------------------------------##
 
 from multiprocessing import Pool
