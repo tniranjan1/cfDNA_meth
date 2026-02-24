@@ -16,7 +16,7 @@ def construct_label_combos() -> dict:
     these_labels = {}
     labels = []
 #    labels.append(ctrls + fcd_subtypes + mcd_other + ms_subtypes + ['TLE', 'leukocyte'])
-    labels.append(fcd_subtypes + mcd_other + mmcd_other + ['Control-NCx', 'TLE', 'leukocyte'])
+    labels.append(fcd_subtypes + mcd_other + mmcd_other + [ 'FCD2', 'FCD3', 'Control-NCx', 'TLE', 'leukocyte'])
 #    labels.append([ 'FCD', 'non-FCD' ])
     labels.append([ 'FCD' ])
 #    labels.append([ 'non-FCD' ])

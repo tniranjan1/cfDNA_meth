@@ -149,7 +149,7 @@ import random
 random.seed(42)
 samples = current_round_labels.index.tolist()
 random.shuffle(samples)
-beta_norm = beta_norm.loc[samples,:]
+#beta_norm = beta_norm.loc[samples,:]
 beta_corrected = beta_corrected.loc[samples,:]
 current_round_labels = current_round_labels.loc[samples,:]
 
