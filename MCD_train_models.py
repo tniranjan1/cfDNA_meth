@@ -74,32 +74,65 @@ else:
 # normalize for batch effects
 if os.path.exists(work_dir + "/beta_corrected.pkl"):
     with open(work_dir + "/beta_corrected.pkl", "rb") as f:
-        beta_corrected, tissues, gse_batches = pickle.load(f)
+        _, tissues, gse_batches = pickle.load(f)
 else:
     beta_corrected, batches = mdi.normalize_methylation_data(beta_norm, combined_pheno_labels)
     tissues = batches['PhenoVal']
     gse_batches = batches['GSM_start']
+    ctrl_ep_ind = (gse_batches.loc[gse_batches.index] == 'GSM560')
+    ctrl_ep_ind = ctrl_ep_ind | (gse_batches.loc[gse_batches.index] == 'GSM472')
+    ctrl_ep_ind = (combined_pheno_labels.loc[gse_batches.index]['non-epilepsy'] == 1) & ctrl_ep_ind
+    ctrl_ep_ind = gse_batches.index[ctrl_ep_ind]
     beta_norm_pca = mdi.run_pca(beta_norm, tissues, n_components=5)
     beta_corrected_pca = mdi.run_pca(beta_corrected, tissues, n_components=5)
-    norm_pca_plot = work_dir + "/pca_plots/beta_norm_pca_plot.pdf"
-    corr_pca_plot = work_dir + "/pca_plots/beta_corrected_pca_plot.pdf"
-    mdi.plot_pca(beta_norm_pca, tissues, gse_batches, output_path=norm_pca_plot)
-    mdi.plot_pca(beta_corrected_pca, tissues, gse_batches, output_path=corr_pca_plot)
+    norm_pca_plot = work_dir + "/pca_plots/beta_norm_pca_plot_2.pdf"
+    corr_pca_plot = work_dir + "/pca_plots/beta_corrected_pca_plot_2.pdf"
+    adjusted_gse = gse_batches.copy()
+    adjusted_gse[ctrl_ep_ind] = adjusted_gse[ctrl_ep_ind].str.replace('GSM', 'ctrlGSM')
+    mdi.plot_pca(beta_norm_pca, tissues, adjusted_gse, output_path=norm_pca_plot)
+    mdi.plot_pca(beta_corrected_pca, tissues, adjusted_gse, output_path=corr_pca_plot)
     with open(work_dir + "/beta_corrected.pkl", "wb") as f:
         pickle.dump([beta_corrected, tissues, gse_batches], f)
 
 ##-----------------------------------------------------------------------------------------------##
 
-beta_corrected = beta_corrected.loc[combined_pheno_labels.index,:]
 # get top feature vector
 if os.path.exists(work_dir + "/keep.pkl"):
     with open(work_dir + "/keep.pkl", "rb") as f:
         keep = pickle.load(f)
 else:
-    keep = mdi.find_top_features(beta_corrected, combined_pheno_labels)
+    keep = mdi.find_top_features(beta_norm, combined_pheno_labels)
     # store keep for later use
     with open(work_dir + "/keep.pkl", "wb") as f:
         pickle.dump(keep, f)
+
+##-----------------------------------------------------------------------------------------------##
+
+# labels to use
+these_labels = mdg.construct_label_combos()
+train_size = mdg.get_training_sizes()
+leukocyte_gses = list(set(gse_batches[combined_pheno_labels.index[combined_pheno_labels['leukocyte'] == 1]]))
+# max valid number of samples per label
+allowed_classes = [ [ 'GSM560', 'GSM472' ],
+                    [ 'GSM102', 'GSM191', 'GSM213', 'GSM144' ],
+                    [ 'GSM472', 'GSM271', 'GSM992', 'GSM991' ] ]
+mcd_classes = allowed_classes[0]
+ad_classes = allowed_classes[1]
+ms_classes = allowed_classes[2]
+mcd_pheno_labels = combined_pheno_labels.loc[gse_batches.index[gse_batches.isin(mcd_classes)]]
+mcd_pheno_labels = pd.concat([ mcd_pheno_labels, combined_pheno_labels[combined_pheno_labels['leukocyte'] == 1] ])
+ad_pheno_labels = combined_pheno_labels.loc[gse_batches.index[gse_batches.isin(ad_classes)]]
+ad_pheno_labels = pd.concat([ ad_pheno_labels, combined_pheno_labels[combined_pheno_labels['leukocyte'] == 1] ])
+ms_pheno_labels = combined_pheno_labels.loc[gse_batches.index[gse_batches.isin(ms_classes)]]
+ms_pheno_labels = pd.concat([ ms_pheno_labels, combined_pheno_labels[combined_pheno_labels['leukocyte'] == 1] ])
+# # do mcd in this round
+current_round = 'mcd'
+if current_round == 'mcd':
+    current_round_labels = mcd_pheno_labels
+elif current_round == 'ad':
+    current_round_labels = ad_pheno_labels
+elif current_round == 'ms':
+    current_round_labels = ms_pheno_labels
 
 ##-----------------------------------------------------------------------------------------------##
 
@@ -107,19 +140,19 @@ import random
 
 # randomize sample order (affects which samples are chosen for training vs validation)
 random.seed(42)
-samples = combined_pheno_labels.index.tolist()
+samples = current_round_labels.index.tolist()
 random.shuffle(samples)
-beta_corrected = beta_corrected.loc[samples,:]
-combined_pheno_labels = combined_pheno_labels.loc[samples,:]
+beta_norm = beta_norm.loc[samples,:]
+current_round_labels = current_round_labels.loc[samples,:]
 
 ##-----------------------------------------------------------------------------------------------##
 
-# labels to use
-these_labels = mdg.construct_label_combos()
-train_size = mdg.get_training_sizes()
-# max valid number of samples per label
-max_allowed, max_valid = mdg.get_allowed_sizes(these_labels, train_size, combined_pheno_labels,
+max_allowed, max_valid = mdg.get_allowed_sizes(these_labels, train_size, current_round_labels,
                                                max_size=60)
+
+if current_round == 'mcd':
+    max_allowed['Control-NCx'] = 3
+    max_valid['Control-NCx'] = 2
 
 studies = {}
 BATCH_SIZE = 64
@@ -166,7 +199,7 @@ import time
 import gc
 
 # Loop through label combinations and train models in parallel (2-3 at a time)
-n_processes = 12  # Number of labels to train simultaneously
+n_processes = 6  # Number of labels to train simultaneously
 pending_results = []  # Queue to track pending async results (max n_processes)
 
 with Pool(processes=n_processes) as pool:
@@ -205,7 +238,7 @@ with Pool(processes=n_processes) as pool:
                 sys.stdout = f
                 print(f"Generating data for label combo: {l_name}")
                 # Generate data dict for this label combo (sequential in main process)
-                data_dict = mdg.data_generator(label, beta_corrected, combined_pheno_labels, keep,
+                data_dict = mdg.data_generator(label, beta_norm, current_round_labels, keep,
                                                max_allowed, max_valid, these_labels, BATCH_SIZE)
                 data_dict['BATCH_SIZE'] = BATCH_SIZE
                 data_dict['singleton'] = True  # simulate single-read sampling

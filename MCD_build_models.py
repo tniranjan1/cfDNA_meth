@@ -70,13 +70,16 @@ def build_meth_model(n_cpgs, n_classes, proj_dim=128, l1_proj=1e-5, l2_proj=1e-5
         x = layers.Concatenate(name="concat_fraction")([x, fraction_scaled])
     
     if use_hidden1:
-        x = layers.Dense(proj_dim // 4, activation="relu",
+        # Use proj_dim // 2 instead of // 4 to avoid severe bottleneck with small proj_dim
+        hidden1_dim = max(16, proj_dim // 2)
+        x = layers.Dense(hidden1_dim, activation="relu",
             kernel_regularizer=keras.regularizers.l2(l2_hidden),
             name="hidden_dense_1")(x)
         x = layers.BatchNormalization(name="hidden_batchnorm_1")(x)
         x = layers.Dropout(dropout_h1, name="hidden_dropout_1")(x)
         if use_hidden2:
-            x = layers.Dense(max(1, proj_dim // 4), activation="relu",
+            hidden2_dim = max(8, proj_dim // 4)
+            x = layers.Dense(hidden2_dim, activation="relu",
                 kernel_regularizer=keras.regularizers.l2(l2_hidden),
                 name="hidden_dense_2")(x)
             x = layers.Dropout(dropout_h2, name="hidden_dropout_2")(x)
@@ -94,7 +97,6 @@ class CapacityCheckCallback(tf.keras.callbacks.Callback):
     """
     Stop if model is clearly underfitting (insufficient capacity).
     """
-    model: tf.keras.Model
     def __init__(self, patience=15, min_train_auc=0.65):
         super().__init__()
         self.patience = patience

@@ -10,17 +10,19 @@ def construct_label_combos() -> list:
     ctrls = [ 'Control-NCx', 'Control-WM', 'Control-Cerebellum' ]
     fcd_subtypes = [ 'FCD1A', 'FCD2A', 'FCD2B', 'FCD3A', 'FCD3B', 'FCD3C', 'FCD3D' ]
     mcd_other = [ 'HME', 'MOGHE', 'PMG', 'TSC', 'mMCD' ]
+    mmcd_other = [ 'MCD1', 'MCD3' ]
     ms_subtypes = [ 'Demy_MS_Hipp', 'My_MS_Hipp', 'MS' ]
     ad_subtypes = [ 'AD-NCx' ]
     labels = []
 #    labels.append(ctrls + fcd_subtypes + mcd_other + ms_subtypes + ['TLE', 'leukocyte'])
+    labels.append(fcd_subtypes + mcd_other + mmcd_other + ['Control-NCx', 'TLE', 'leukocyte'])
 #    labels.append([ 'Ctrl', 'Disease' ])
-    labels.append([ 'Ctrl' ])
+#    labels.append([ 'Ctrl' ])
     labels.append([ 'Disease' ])
 #    labels.append([ 'FCD', 'non-FCD' ])
     labels.append([ 'FCD' ])
-    labels.append([ 'non-FCD' ])
-#    labels.append([ 'FCD1A', 'FCD2', 'FCD3', 'non-FCD' ])
+#    labels.append([ 'non-FCD' ])
+    labels.append([ 'FCD1A', 'FCD2', 'FCD3', 'non-FCD' ])
 #    labels.append(fcd_subtypes + ['non-FCD'])
     labels.append([ 'FCD1A' ])
     labels.append([ 'FCD2' ])
@@ -32,25 +34,25 @@ def construct_label_combos() -> list:
     labels.append([ 'FCD3C' ])
     labels.append([ 'FCD3D' ])
     labels = labels + [ [ m ] for m in mcd_other ]
-#    labels.append([ 'MCD1', 'MCD3', 'non-MCD' ])
+    labels.append([ 'MCD1', 'MCD3', 'non-MCD' ])
     labels.append([ 'MCD1' ])
     labels.append([ 'MCD3' ])
     labels.append([ 'non-MCD' ])
 #    labels.append([ 'TLE', 'non-TLE' ])
     labels.append([ 'TLE' ])
     labels.append([ 'non-TLE' ])
-    labels.append([ 'isMS', 'non-MS' ])
-    labels.append([ 'MS_normal' ])
-    labels.append([ 'MS_abnormal' ])
-    labels.append([ 'MS' ])
-    labels.append([ 'Control-WM' ])
-    labels.append([ 'Demy_MS_Hipp' ])
-    labels.append([ 'My_MS_Hipp' ])
-    labels.append([ 'leukocyte' ])
+#    labels.append([ 'isMS', 'non-MS' ])
+#    labels.append([ 'MS_normal' ])
+#    labels.append([ 'MS_abnormal' ])
+#    labels.append([ 'MS' ])
+#    labels.append([ 'Control-WM' ])
+#    labels.append([ 'Demy_MS_Hipp' ])
+#    labels.append([ 'My_MS_Hipp' ])
+#    labels.append([ 'leukocyte' ])
 #    labels.append([ 'epilepsy', 'non-epilepsy' ])
-    labels.append([ 'epilepsy' ])
-    labels.append([ 'non-epilepsy' ])
-    labels.append([ 'AD-NCx' ])
+#    labels.append([ 'epilepsy' ])
+#    labels.append([ 'non-epilepsy' ])
+#    labels.append([ 'AD-NCx' ])
     return labels
 
 ##-----------------------------------------------------------------------------------------------##

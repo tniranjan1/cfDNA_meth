@@ -173,6 +173,9 @@ def get_methylation_data(filepaths: list[str], picklepaths: list[str] | None) ->
     if len(samples_removed) > 0:
         merged_data = merged_data.drop(index=samples_removed, errors='ignore')
     for pickle_data in multi_pickled:
+        # Ensure pickle_data is a DataFrame
+        if isinstance(pickle_data, pd.Series):
+            pickle_data = pickle_data.to_frame().T
         common_sites = merged_data.columns.intersection(pickle_data.columns)
         merged_data = merged_data[common_sites]
         pickle_data = pickle_data[common_sites]
@@ -180,6 +183,7 @@ def get_methylation_data(filepaths: list[str], picklepaths: list[str] | None) ->
 #    merged_min = merged_data.min(axis=0)
 #    merged_max = merged_data.max(axis=0)
 #    merged_data = (merged_data - merged_min) / (merged_max - merged_min)
+    assert isinstance(merged_data, pd.DataFrame), "Merged data should be a DataFrame"
     merged_data[merged_data.isna()] = 0
     return merged_data, samples_removed
 
@@ -228,11 +232,13 @@ def customize_and_merge_phenotype_labels(MCD_pheno: pdDF, MS_pheno: pdDF, other_
     combined['Pheno7'] = 'non-MS'
     MS_norm = [ 'Demy_MS_Hipp', 'MS' ]
     combined.loc[combined['Pheno1'].isin(MS_norm + ['My_MS_Hipp']), 'Pheno7'] = 'isMS'
-    combined['Pheno8'] =	'MS_normal'
+    combined['Pheno8'] = 'MS_normal'
     combined.loc[combined['Pheno1'].isin(MS_norm), 'Pheno8'] = 'MS_abnormal'
     combined['Pheno9'] = 'non-epilepsy'
     combined.loc[combined['Pheno6'] != 'non-MCD', 'Pheno9'] = 'epilepsy'
     combined.loc[combined['Pheno3'] == 'TLE', 'Pheno9'] = 'epilepsy'
+    combined.loc[combined['Pheno5'] != 'non-FCD', 'Pheno9'] = 'epilepsy'
+    combined.loc[combined['Pheno1'] == 'TSC', 'Pheno9'] = 'epilepsy'
     # one-hot encode phenotype labels
     combined_pheno_labels = pd.get_dummies(combined.stack()).groupby(level=0).max()
     # copy MS_Ctrl samples to Control-WM
@@ -316,7 +322,7 @@ def normalize_methylation_data(beta_norm: pdDF, combined_pheno_labels: pdDF) -> 
         # Run ComBat - it models batch effects with an empirical Bayes approach
         # that shares information across probes
         assert isinstance(batch_labels, pd.Series), "Batch GSM identifiers should be a Series"
-        corrected_data = pycombat.pycombat_norm(data_for_combat, batch_labels.values)
+        corrected_data = pycombat.pycombat_norm(data_for_combat, batch_labels.values, par_prior=False)
         # Transpose back: (CpG x samples) -> (samples x CpG)
         beta_corrected.loc[batch_indices] = corrected_data.T
     # Clip to valid beta range [0, 1]

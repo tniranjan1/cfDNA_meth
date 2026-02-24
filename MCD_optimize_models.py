@@ -187,13 +187,26 @@ def objective(trial: optuna.Trial, Xtrn, Ytrn, Wtrn, Ttrn, Xval, Yval, Wval, Tva
     seed = 42
     tf.random.set_seed(seed)
     np.random.seed(seed)
-    # Search space
-    proj_dim     = trial.suggest_categorical("proj_dim", [ 16, 32, 64 ])
-    l1_proj      = trial.suggest_float("l1_proj", 1e-6, 1e-2, log=True)
-    l2_proj      = trial.suggest_float("l2_proj", 1e-6, 1e-2, log=True)
-    l2_hidden    = trial.suggest_float("l2_hidden", 1e-6, 1e-2, log=True)
-    noise_std    = trial.suggest_float("noise_std", 1e-3, 5e-2, log=True)
-    dropout_proj = trial.suggest_float("dropout", 0.4, 0.8)
+    # Define loss and final activation functions
+    n_cpgs = Xtrn.shape[1]
+    n_classes = Ytrn.shape[1]
+    # Allow slightly larger projection for more capacity
+    proj_dim = [ 32, 64 ]
+    if n_classes > 2:
+        proj_dim = [ 64, 128 ]
+    if n_classes > 4:
+        proj_dim = [ 128, 256 ]
+    if n_classes > 8:
+        proj_dim = [ 256, 512 ]
+    proj_dim     = trial.suggest_categorical("proj_dim", proj_dim)
+    # Reduce regularization ranges - model is small, needs less regularization
+    l1_proj      = trial.suggest_float("l1_proj", 1e-7, 1e-4, log=True)
+    l2_proj      = trial.suggest_float("l2_proj", 1e-7, 1e-4, log=True)
+    l2_hidden    = trial.suggest_float("l2_hidden", 1e-7, 1e-4, log=True)
+    # Reduce noise range - spike-in already adds noise, batch norm also adds some
+    noise_std    = trial.suggest_float("noise_std", 1e-4, 1e-2, log=True)
+    # Lower dropout range - 0.4-0.8 is way too high for small models
+    dropout_proj = trial.suggest_float("dropout", 0.1, 0.4)
 #    dropout_h1   = trial.suggest_float("dropout_h1", 0.1, 0.6)
 #    dropout_h2   = trial.suggest_float("dropout_h2", 0.1, 0.6)
     dropout_h1   = dropout_proj
@@ -202,11 +215,10 @@ def objective(trial: optuna.Trial, Xtrn, Ytrn, Wtrn, Ttrn, Xval, Yval, Wval, Tva
 #    use_hidden2  = trial.suggest_categorical("use_hidden2", [False, True])
     use_hidden1  = True
     use_hidden2  = True
-    start_lr     = trial.suggest_float("lr", 1e-6, 1e-3, log=True)
-    label_smooth = trial.suggest_float("label_smoothing", 0.0, 0.05)
-    # Define loss and final activation functions
-    n_cpgs = Xtrn.shape[1]
-    n_classes = Ytrn.shape[1]
+    # Slightly higher learning rate range for faster convergence
+    start_lr     = trial.suggest_float("lr", 1e-6, 5e-3, log=True)
+    # Keep label smoothing but maybe reduce max
+    label_smooth = trial.suggest_float("label_smoothing", 0.0, 0.02)
     if n_classes == 1:
         loss = tf.keras.losses.BinaryCrossentropy(from_logits=False)
         out_activation = 'sigmoid'
