@@ -1,5 +1,5 @@
 import tensorflow as tf
-from tensorflow import keras
+from tensorflow import keras # type: ignore
 from tensorflow.keras import backend as K # type: ignore
 from tensorflow.keras import layers # type: ignore
 
@@ -71,14 +71,14 @@ def build_meth_model(n_cpgs, n_classes, proj_dim=128, l1_proj=1e-5, l2_proj=1e-5
     
     if use_hidden1:
         # Use proj_dim // 2 instead of // 4 to avoid severe bottleneck with small proj_dim
-        hidden1_dim = max(16, proj_dim // 2)
+        hidden1_dim = max(16, min(proj_dim // 2, n_classes * 4))
         x = layers.Dense(hidden1_dim, activation="relu",
             kernel_regularizer=keras.regularizers.l2(l2_hidden),
             name="hidden_dense_1")(x)
         x = layers.BatchNormalization(name="hidden_batchnorm_1")(x)
         x = layers.Dropout(dropout_h1, name="hidden_dropout_1")(x)
         if use_hidden2:
-            hidden2_dim = max(8, proj_dim // 4)
+            hidden2_dim = max(8, min(proj_dim // 4, n_classes * 2))
             x = layers.Dense(hidden2_dim, activation="relu",
                 kernel_regularizer=keras.regularizers.l2(l2_hidden),
                 name="hidden_dense_2")(x)

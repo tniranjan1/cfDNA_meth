@@ -265,9 +265,9 @@ def objective(trial: optuna.Trial, Xtrn, Ytrn, Wtrn, Ttrn, Xval, Yval, Wval, Tva
                         verbose=2,  # type: ignore[arg-type]
                         shuffle=True,
                         callbacks=callbacks,
-                        use_multiprocessing=True,
-                        workers=10,
-                        max_queue_size=10)
+                        use_multiprocessing=True, # type: ignore
+                        workers=10, # type: ignore
+                        max_queue_size=10) # type: ignore
     # Save model for this trial (optional, can be commented out to save disk space)
     if model_save_dir is not None:
         os.makedirs(model_save_dir, exist_ok=True)
