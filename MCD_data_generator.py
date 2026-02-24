@@ -1,6 +1,6 @@
 ##-----------------------------------------------------------------------------------------------##
 
-def construct_label_combos() -> list:
+def construct_label_combos() -> dict:
     """
     Construct label combinations for model training.
 
@@ -13,12 +13,10 @@ def construct_label_combos() -> list:
     mmcd_other = [ 'MCD1', 'MCD3' ]
     ms_subtypes = [ 'Demy_MS_Hipp', 'My_MS_Hipp', 'MS' ]
     ad_subtypes = [ 'AD-NCx' ]
+    these_labels = {}
     labels = []
 #    labels.append(ctrls + fcd_subtypes + mcd_other + ms_subtypes + ['TLE', 'leukocyte'])
     labels.append(fcd_subtypes + mcd_other + mmcd_other + ['Control-NCx', 'TLE', 'leukocyte'])
-#    labels.append([ 'Ctrl', 'Disease' ])
-#    labels.append([ 'Ctrl' ])
-    labels.append([ 'Disease' ])
 #    labels.append([ 'FCD', 'non-FCD' ])
     labels.append([ 'FCD' ])
 #    labels.append([ 'non-FCD' ])
@@ -41,19 +39,30 @@ def construct_label_combos() -> list:
 #    labels.append([ 'TLE', 'non-TLE' ])
     labels.append([ 'TLE' ])
     labels.append([ 'non-TLE' ])
-#    labels.append([ 'isMS', 'non-MS' ])
-#    labels.append([ 'MS_normal' ])
-#    labels.append([ 'MS_abnormal' ])
-#    labels.append([ 'MS' ])
-#    labels.append([ 'Control-WM' ])
-#    labels.append([ 'Demy_MS_Hipp' ])
-#    labels.append([ 'My_MS_Hipp' ])
+    these_labels['mcd'] = labels
+    labels = []
+    labels.append([ 'AD-NCx' ])
+    these_labels['ad'] = labels
+    labels = []
+    labels.append([ 'isMS', 'non-MS' ])
+    labels.append([ 'MS_normal' ])
+    labels.append([ 'MS_abnormal' ])
+    labels.append([ 'MS' ])
+    labels.append([ 'Control-WM' ])
+    labels.append([ 'Demy_MS_Hipp' ])
+    labels.append([ 'My_MS_Hipp' ])
+    these_labels['ms'] = labels
+    labels = []
+    labels.append([ 'Ctrl', 'Disease' ])
+    labels.append([ 'Ctrl' ])
+    labels.append([ 'Disease' ])
+    these_labels['all'] = labels
 #    labels.append([ 'leukocyte' ])
 #    labels.append([ 'epilepsy', 'non-epilepsy' ])
 #    labels.append([ 'epilepsy' ])
 #    labels.append([ 'non-epilepsy' ])
 #    labels.append([ 'AD-NCx' ])
-    return labels
+    return these_labels
 
 ##-----------------------------------------------------------------------------------------------##
 
