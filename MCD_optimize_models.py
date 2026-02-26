@@ -116,12 +116,12 @@ class FractionAUCPRCallback(tf.keras.callbacks.Callback):
         # Log training metrics
         for frac, auc_pr in train_auc_pr.items():
             metric_name = f"auc_pr_frac_{frac:.4f}"
-            logs[metric_name] = auc_pr
+            logs[metric_name] = auc_pr # type: ignore[assignment]
         # Log validation metrics
         if self.verbose == 0:
             for frac, auc_pr in val_auc_pr.items():
                 metric_name = f"val_auc_pr_frac_{frac:.4f}"
-                logs[metric_name] = auc_pr
+                logs[metric_name] = auc_pr # type: ignore[assignment]
         # Optionally print per-fraction AUC-PR
         if self.verbose > 0:
             print(f"\n  Epoch {epoch + 1} - AUC-PR per spike-in fraction:")

@@ -74,7 +74,7 @@ else:
 # normalize for batch effects
 if os.path.exists(work_dir + "/beta_corrected.pkl"):
     with open(work_dir + "/beta_corrected.pkl", "rb") as f:
-        _, tissues, gse_batches = pickle.load(f)
+        beta_corrected, tissues, gse_batches = pickle.load(f)
 else:
     beta_corrected, batches = mdi.normalize_methylation_data(beta_norm, combined_pheno_labels)
     tissues = batches['PhenoVal']
