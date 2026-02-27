@@ -835,7 +835,7 @@ gc.collect()
 
 def directional_multilabel_score(test_sample: pd.Series, marker_dict: dict[str, pd.DataFrame],
                                   reference: pdDF, reference_label_nohot: pd.Series,
-                                  min_effect_size: float = 0.5) -> dict:
+                                  min_effect_size: float = 1.96) -> dict:
     """
     Score a test sample against all conditions using pairwise effect sizes.
     
@@ -895,6 +895,9 @@ def directional_multilabel_score(test_sample: pd.Series, marker_dict: dict[str, 
             d = marker_df.loc[common_cpgs, other_condition]
             # Filter to informative CpGs
             mask = d.abs() >= min_effect_size
+            mask = (((d - d.mean()) / d.std()).abs() > min_effect_size).to_numpy()
+            if mask.sum() < 1000:
+                mask = d.index.isin(d.abs().nlargest(1000).index) # type: ignore
             if mask.sum() < 10:
                 condition_scores[other_condition] = np.nan
                 continue
@@ -964,7 +967,7 @@ def directional_multilabel_score(test_sample: pd.Series, marker_dict: dict[str, 
 def directional_multilabel_score_weighted(test_sample: pd.Series,
                                           marker_dict: dict[str, pd.DataFrame],
                                           reference: pdDF, reference_label_nohot: pd.Series,
-                                          min_effect_size: float = 0.5) -> dict:
+                                          min_effect_size: float = 1.96) -> dict:
     """
     Score a test sample against all conditions using pairwise effect sizes.
     
@@ -1024,6 +1027,9 @@ def directional_multilabel_score_weighted(test_sample: pd.Series,
             d = marker_df.loc[common_cpgs, other_condition]
             # Filter to informative CpGs
             mask = d.abs() >= min_effect_size
+            mask = (((d - d.mean()) / d.std()).abs() > min_effect_size).to_numpy()
+            if mask.sum() < 1000:
+                mask = d.index.isin(d.abs().nlargest(1000).index) # type: ignore
             if mask.sum() < 10:
                 condition_scores[other_condition] = np.nan
                 continue
@@ -1105,8 +1111,9 @@ def _wrap_score(args: tuple) -> tuple[str, dict]:
         tuple: (filename, score_dict)
     """
     test_sample, marker_dict, reference, reference_label_nohot, min_effect_size, filename = args
-    print(f"First scoring sample {filename}...")
-    score_1 = directional_multilabel_score(test_sample, marker_dict, reference, reference_label_nohot, min_effect_size)
+#    print(f"First scoring sample {filename}...")
+#    score_1 = directional_multilabel_score(test_sample, marker_dict, reference, reference_label_nohot, min_effect_size)
+    score_1 = None
     print(f"Second scoring sample {filename}...")
     score_2 = directional_multilabel_score_weighted(test_sample, marker_dict, reference, reference_label_nohot, min_effect_size)
     return (filename, {'unweighted': score_1, 'weighted': score_2})
@@ -1114,7 +1121,8 @@ def _wrap_score(args: tuple) -> tuple[str, dict]:
 def run_predictions(samples: dict, marker_dict: dict,
                     reference: pd.DataFrame,
                     reference_label_nohot: pd.Series,
-                    min_effect_size: float = 0) -> tuple[dict[str, dict], dict[str, dict]]:
+                    min_effect_size: float = 1.96,
+                    pools: int = 8) -> tuple[dict[str, dict], dict[str, dict]]:
     """
     Run predictions for a set of samples using a given marker dictionary.
     
@@ -1129,8 +1137,11 @@ def run_predictions(samples: dict, marker_dict: dict,
         tuple[dict[str, dict], dict[str, dict]]: Tuple of unweighted and weighted prediction results
     """
     items = [ (test_sample, marker_dict, reference, reference_label_nohot, min_effect_size, filename) for filename, test_sample in samples.items() ]
-    with Pool(processes=8) as pool:
-        out = pool.map(_wrap_score, items, chunksize=1)
+    if pools == 0:
+        out = list(map(_wrap_score, items))
+    else:
+        with Pool(processes=pools) as pool:
+            out = pool.map(_wrap_score, items, chunksize=1)
     results = { filename: score_dict['unweighted'] for filename, score_dict in out }
     results_weighted = { filename: score_dict['weighted'] for filename, score_dict in out }
     return results, results_weighted
@@ -1141,19 +1152,46 @@ tiny_markers = [ 'leukocyte', 'non-leukocyte' ]
 tiny_markers = { label: lk_cpgs[label][[ t for t in tiny_markers if t != label ]] for label in tiny_markers }
 lk_unweight, lk_weighted = run_predictions(within_zero_series, tiny_markers, reference, lk_label_nohot)
 
-ep_label_nohot = reference_label_nohot.map({ 'Control-NCx': 'non-ep', 'AD-NCx': 'non-ep', 'leukocyte': 'leukocyte' }).fillna('ep')
+ep_label_nohot = reference_label_nohot.map({ a: a for a in [ 'Control-NCx', 'AD-NCx', 'leukocyte' ] }).fillna('ep')
+#ep_label_nohot = reference_label_nohot.isin([ 'Control-NCx', 'AD-NCx', 'leukocyte' ]).map({ True: 'non-ep', False: 'ep' })
 ep_cpgs = deconvolution_playground(reference, ep_label_nohot, method='effect_size', n_jobs=6)
-tiny_markers = [ 'ep', 'non-ep' ]
+tiny_markers = [ 'ep', 'Control-NCx' ]
 tiny_markers = { label: ep_cpgs[label][[ t for t in tiny_markers if t != label ]] for label in tiny_markers }
-ep_unweight, ep_weighted = run_predictions(within_zero_series, tiny_markers, reference, ep_label_nohot, min_effect_size=0.1)
+ep_unweight, ep_weighted = run_predictions(within_zero_series, tiny_markers, reference, ep_label_nohot)
+
+tiny_markers = [ 'AD-NCx', 'Control-NCx' ]
+tiny_markers = { label: ep_cpgs[label][[ t for t in tiny_markers if t != label ]] for label in tiny_markers }
+ad_unweight, ad_weighted = run_predictions(within_zero_series, tiny_markers, reference, ep_label_nohot)
 
 mcd_label_nohot = reference_label_nohot.str.replace(r'^(FCD[1-9])[A-Za-z]$', 'FCD', regex=True)
+mcd_label_nohot = mcd_label_nohot.map({ a: a for a in [ 'FCD', 'leukocyte', 'Control-NCx', 'AD-NCx', 'TLE' ] }).fillna('non-FCD')
 mcd_cpgs = deconvolution_playground(reference, mcd_label_nohot, method='effect_size', n_jobs=6)
+tiny_markers = [ 'FCD', 'Control-NCx' ]
+tiny_markers = { label: mcd_cpgs[label][[ t for t in tiny_markers if t != label ]] for label in tiny_markers }
+mcd_unweight, mcd_weighted = run_predictions(within_zero_series, tiny_markers, reference, mcd_label_nohot)
+tiny_markers = [ 'FCD', 'TLE' ]
+tiny_markers = { label: mcd_cpgs[label][[ t for t in tiny_markers if t != label ]] for label in tiny_markers }
+mcd_v_tle_unweight, mcd_v_tle_weighted = run_predictions(within_zero_series, tiny_markers, reference, mcd_label_nohot)
 
 fcd_label_nohot = reference_label_nohot.str.replace(r'^(FCD[1-9])[A-Za-z]$', r'\1', regex=True)
 fcd_cpgs = deconvolution_playground(reference, fcd_label_nohot, method='effect_size', n_jobs=6)
+tiny_markers = [ 'TLE', 'FCD2', 'leukocyte' ]
+tiny_markers = { label: fcd_cpgs[label][[ t for t in tiny_markers if t != label ]] for label in tiny_markers }
+fcd_unweight, fcd_weighted = run_predictions(within_zero_series, tiny_markers, reference, fcd_label_nohot)
 
-fcd_markers = [ 'FCD1', 'FCD2', 'FCD3' ]
+
+tiny_markers = [ 'Control-NCx', 'TLE' ]
+tiny_markers = { label: marker_cpgs[label][[ t for t in tiny_markers if t != label ]] for label in tiny_markers }
+tle_unweight, tle_weighted = run_predictions(within_zero_series, tiny_markers, reference, reference_label_nohot, pools=8)
+
+
+tiny_markers = [ 'FCD2', 'TLE' ]
+tiny_markers = { label: marker_cpgs[label][[ t for t in tiny_markers if t != label ]] for label in tiny_markers }
+fcd2_unweight, fcd2_weighted = run_predictions(within_zero_series, tiny_markers, reference, reference_label_nohot, pools=8)
+
+tiny_markers = [ 'Control-NCx', 'leukocyte' ]
+tiny_markers = { label: fcd_cpgs[label][[ t for t in tiny_markers if t != label ]] for label in tiny_markers }
+ctx_unweight, ctx_weighted = run_predictions(within_zero_series, tiny_markers, reference, fcd_label_nohot, pools=8)
 
 
 
