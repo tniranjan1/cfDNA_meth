@@ -1115,13 +1115,15 @@ def _wrap_score(args: tuple) -> tuple[str, dict]:
 #    score_1 = directional_multilabel_score(test_sample, marker_dict, reference, reference_label_nohot, min_effect_size)
     score_1 = None
     print(f"Second scoring sample {filename}...")
-    score_2 = directional_multilabel_score_weighted(test_sample, marker_dict, reference, reference_label_nohot, min_effect_size)
+    score_2 = []
+    for mef in min_effect_size:
+        score_2.append(directional_multilabel_score_weighted(test_sample, marker_dict, reference, reference_label_nohot, mef))
     return (filename, {'unweighted': score_1, 'weighted': score_2})
 
 def run_predictions(samples: dict, marker_dict: dict,
                     reference: pd.DataFrame,
                     reference_label_nohot: pd.Series,
-                    min_effect_size: float = 1.96,
+                    min_effect_size: list[float] = [ 1.96 ],
                     pools: int = 8) -> tuple[dict[str, dict], dict[str, dict]]:
     """
     Run predictions for a set of samples using a given marker dictionary.
@@ -1180,14 +1182,17 @@ tiny_markers = { label: fcd_cpgs[label][[ t for t in tiny_markers if t != label 
 fcd_unweight, fcd_weighted = run_predictions(within_zero_series, tiny_markers, reference, fcd_label_nohot)
 
 
-tiny_markers = [ 'Control-NCx', 'TLE' ]
-tiny_markers = { label: marker_cpgs[label][[ t for t in tiny_markers if t != label ]] for label in tiny_markers }
-tle_unweight, tle_weighted = run_predictions(within_zero_series, tiny_markers, reference, reference_label_nohot, pools=8)
+tiny_markers = [ 'FCD2', 'TLE', 'Control-NCx' ]
+tiny_markers = { label: fcd_cpgs[label][[ t for t in tiny_markers if t != label ]] for label in tiny_markers }
+mefs = [ 0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.65, 1.96, 2.0, 2.25, 2.56, 2.75, 3.0, 3.25, 3.5, 3.75, 4.0 ]
+tle_unweight, tle_weighted = run_predictions(within_zero_series, tiny_markers, reference, fcd_label_nohot, min_effect_size=mefs, pools=8)
+mefs = [ 3.25, 3.5, 3.75, 4.0, 4.25, 4.5, 4.75, 5.0 ]
+tle_unweight_2, tle_weighted_2 = run_predictions(within_zero_series, tiny_markers, reference, fcd_label_nohot, min_effect_size=mefs, pools=8)
 
 
 tiny_markers = [ 'FCD2', 'TLE' ]
-tiny_markers = { label: marker_cpgs[label][[ t for t in tiny_markers if t != label ]] for label in tiny_markers }
-fcd2_unweight, fcd2_weighted = run_predictions(within_zero_series, tiny_markers, reference, reference_label_nohot, pools=8)
+tiny_markers = { label: fcd_cpgs[label][[ t for t in tiny_markers if t != label ]] for label in tiny_markers }
+fcd2_unweight, fcd2_weighted = run_predictions(within_zero_series, tiny_markers, reference, fcd_label_nohot, pools=8)
 
 tiny_markers = [ 'Control-NCx', 'leukocyte' ]
 tiny_markers = { label: fcd_cpgs[label][[ t for t in tiny_markers if t != label ]] for label in tiny_markers }
@@ -1212,3 +1217,197 @@ for file in tqdm(within_zero_series.keys()):
                                                             reference = reference,
                                                             reference_label_nohot = reference_label_nohot,
                                                             min_effect_size=0)
+    
+
+labels = { 'MethylDackel.EP3303_M_CSF_epi.POSsort.dedup_CpG.bedGraph.gz': [ 'EP', 'FCD', 'FCD2B', 'EP' ],
+           'MethylDackel.EP3462_M_CSF_ctrl.POSsort.dedup_CpG.bedGraph.gz': [ 'Ctrl', 'Ctrl', 'Ctrl', 'Ctrl' ],
+           'MethylDackel.EP3390_M_CSF_epi.POSsort.dedup_CpG.bedGraph.gz': [ 'EP', 'TLE', 'TLE', 'EP' ],
+           'MethylDackel.EP3383_M_CSF_epi.POSsort.dedup_CpG.bedGraph.gz': [ 'EP', 'FCD', 'FCD2B', 'EP' ],
+           'MethylDackel.EP3428_M_CSF_ctrl.POSsort.dedup_CpG.bedGraph.gz': [ 'Ctrl', 'Ctrl', 'Ctrl', 'AD check' ],
+           'MethylDackel.EP3246_M_CSF_ctrl.POSsort.dedup_CpG.bedGraph.gz': [ 'Ctrl', 'Ctrl', 'Ctrl', 'Ctrl' ],
+           'MethylDackel.EP3449_M_SER_kcnq2.POSsort.dedup_CpG.bedGraph.gz': [ 'Ctrl', 'Ctrl', 'Ctrl', 'Ctrl' ],
+           'MethylDackel.EP3387_M_CSF_epi.POSsort.dedup_CpG.bedGraph.gz': [ 'EP', 'FCD', 'FCD2B', 'EP' ],
+           'MethylDackel.EP3441_M_SER_ctrl.POSsort.dedup_CpG.bedGraph.gz': [ 'Ctrl', 'Ctrl', 'Ctrl', 'Ctrl' ],
+           'MethylDackel.EP3461_M_CSF_epi.POSsort.dedup_CpG.bedGraph.gz': [ 'EP', 'FCD', 'FCD2A', 'EP' ],
+           'MethylDackel.EP3439_M_CSF_ctrl.POSsort.dedup_CpG.bedGraph.gz': [ 'Ctrl', 'Ctrl', 'Ctrl', 'Ctrl' ],
+           'MethylDackel.EP3437_M_CSF_ctrl.POSsort.dedup_CpG.bedGraph.gz': [ 'Ctrl', 'Ctrl', 'Ctrl', 'AD check' ],
+           'MethylDackel.EP3441_M_CSF_ctrl.POSsort.dedup_CpG.bedGraph.gz': [ 'Ctrl', 'Ctrl', 'Ctrl', 'AD check' ],
+           'MethylDackel.EP3443_M_CSF_epi.POSsort.dedup_CpG.bedGraph.gz': [ 'EP', 'TLE', 'TLE', 'EP' ],
+           'MethylDackel.EP3461_M_SER_epi.POSsort.dedup_CpG.bedGraph.gz': [ 'Ctrl', 'Ctrl', 'Ctrl', 'Ctrl' ],
+           'MethylDackel.EP3466_M_SER_ctrl.POSsort.dedup_CpG.bedGraph.gz': [ 'Ctrl', 'Ctrl', 'Ctrl', 'Ctrl' ]
+         }
+labels = pd.DataFrame(labels, index=[ 'EP_v_Ctrl', 'FCD_v_Ctrl', 'TLE_v_Ctrl', 'AD_v_EP_v_Ctrl']).T
+
+## EP signal separating EP from Ctrl
+ep_label_nohot = reference_label_nohot.map({ a: a for a in [ 'Control-NCx', 'AD-NCx', 'leukocyte' ] }).fillna('ep')
+ep_cpgs = deconvolution_playground(reference, ep_label_nohot, method='effect_size', n_jobs=6)
+tiny_markers = [ 'ep', 'Control-NCx' ]
+tiny_markers = { label: ep_cpgs[label][[ t for t in tiny_markers if t != label ]] for label in tiny_markers }
+ep_unweight, ep_weighted = run_predictions(within_zero_series, tiny_markers, reference, ep_label_nohot)
+ep_scores = -pd.DataFrame({ k: v[0]['score_ranking'] for k,v in ep_weighted.items() }).T['ep']
+EP_v_Ctrl_scores = pd.concat([ ep_scores, labels['AD_v_EP_v_Ctrl'].loc[ep_scores.index] ], axis=1)
+# normalize
+EP_v_Ctrl_scores['ep'] = EP_v_Ctrl_scores['ep'] - EP_v_Ctrl_scores['ep'].min() + 0.11
+EP_v_Ctrl_scores['ep'] = EP_v_Ctrl_scores['ep'] / (EP_v_Ctrl_scores['ep'].max() + 0.11)
+# calculate p-value for difference in EP scores between samples labeled 'EP' vs 'Ctrl' in EP_v_Ctrl_scores
+from scipy.stats import mannwhitneyu
+ep_group = EP_v_Ctrl_scores[EP_v_Ctrl_scores['AD_v_EP_v_Ctrl'] == 'EP']['ep']
+ctrl_group = EP_v_Ctrl_scores[EP_v_Ctrl_scores['AD_v_EP_v_Ctrl'] == 'Ctrl']['ep']
+ad_group = EP_v_Ctrl_scores[EP_v_Ctrl_scores['AD_v_EP_v_Ctrl'] == 'AD check']['ep']
+stat, p_value = mannwhitneyu(ep_group, ctrl_group, alternative='greater')
+print(f"Mann-Whitney U test p-value for EP vs Ctrl: {p_value:.4e}")
+# Mann-Whitney U test p-value for EP vs Ctrl: 5.8275e-04
+stat, p_value = mannwhitneyu(ep_group, ad_group, alternative='greater')
+print(f"Mann-Whitney U test p-value for EP vs AD check: {p_value:.4e}")
+# Mann-Whitney U test p-value for EP vs AD check: 2.3810e-02  
+stat, p_value = mannwhitneyu(ad_group, ctrl_group, alternative='greater')
+print(f"Mann-Whitney U test p-value for Ctrl vs AD check: {p_value:.4e}")
+# Mann-Whitney U test p-value for Ctrl vs AD check: 0.016666666666666666
+
+## FCD signal separating FCD from Ctrl
+mcd_label_nohot = reference_label_nohot.str.replace(r'^(FCD[1-9])[A-Za-z]$', 'FCD', regex=True)
+mcd_label_nohot = mcd_label_nohot.map({ a: a for a in [ 'FCD', 'Control-NCx' ] }).fillna('non-FCD')
+mcd_cpgs = deconvolution_playground(reference, mcd_label_nohot, method='effect_size', n_jobs=6)
+tiny_markers = [ 'FCD', 'Control-NCx' ]
+tiny_markers = { label: mcd_cpgs[label][[ t for t in tiny_markers if t != label ]] for label in tiny_markers }
+mcd_unweight, mcd_weighted = run_predictions(within_zero_series, tiny_markers, reference, mcd_label_nohot)
+fcd_scores = -pd.DataFrame({ k: v[0]['score_ranking'] for k,v in mcd_weighted.items() }).T['FCD']
+FCD_v_Ctrl_scores = pd.concat([ fcd_scores, labels['FCD_v_Ctrl'].loc[fcd_scores.index] ], axis=1)
+# drop TLE samples from FCD_v_Ctrl_scores
+FCD_v_Ctrl_scores = FCD_v_Ctrl_scores[FCD_v_Ctrl_scores['FCD_v_Ctrl'] != 'TLE']
+# normalize
+FCD_v_Ctrl_scores['FCD'] = FCD_v_Ctrl_scores['FCD'] - FCD_v_Ctrl_scores['FCD'].min() + 0.64
+FCD_v_Ctrl_scores['FCD'] = FCD_v_Ctrl_scores['FCD'] / (FCD_v_Ctrl_scores['FCD'].max() * 1.2)
+# calculate p-value for difference in FCD scores between samples labeled 'FCD' vs 'Ctrl' in FCD_v_Ctrl_scores
+fcd_group = FCD_v_Ctrl_scores[FCD_v_Ctrl_scores['FCD_v_Ctrl'] == 'FCD']['FCD']
+ctrl_group = FCD_v_Ctrl_scores[FCD_v_Ctrl_scores['FCD_v_Ctrl'] == 'Ctrl']['FCD']
+stat, p_value = mannwhitneyu(fcd_group, ctrl_group, alternative='greater')
+print(f"Mann-Whitney U test p-value for FCD vs Ctrl: {p_value:.4e}")
+# Mann-Whitney U test p-value for FCD vs Ctrl: 9.9900e-04
+
+## RE-use FCD_v_TLE from prior plot
+# p-value = 0.06666666666666667
+
+## TLE_v_Ctrl
+tle_label_nohot = reference_label_nohot.map({ a: a for a in [ 'TLE', 'Control-NCx', 'MOGHE' ] }).fillna('non-TLE')
+tle_cpgs = deconvolution_playground(reference, tle_label_nohot, method='effect_size', n_jobs=6)
+tiny_markers = [ 'MOGHE', 'Control-NCx', 'TLE' ]
+tiny_markers = { label: tle_cpgs[label][[ t for t in tiny_markers if t != label ]] for label in tiny_markers }
+tle_unweight, tle_weighted = run_predictions(within_zero_series, tiny_markers, reference, tle_label_nohot)
+tle_scores = -pd.DataFrame({ k: v[0]['score_ranking'] for k,v in tle_weighted.items() }).T['TLE']
+TLE_v_Ctrl_scores = pd.concat([ tle_scores, labels['TLE_v_Ctrl'].loc[tle_scores.index] ], axis=1)
+# drop samples from TLE_v_Ctrl_scores that start with 'FCD
+TLE_v_Ctrl_scores = TLE_v_Ctrl_scores[~TLE_v_Ctrl_scores['TLE_v_Ctrl'].str.startswith('FCD')]
+# normalize
+TLE_v_Ctrl_scores['TLE'] = TLE_v_Ctrl_scores['TLE'] - TLE_v_Ctrl_scores['TLE'].min() + 1.
+TLE_v_Ctrl_scores['TLE'] = (TLE_v_Ctrl_scores['TLE'] / (TLE_v_Ctrl_scores['TLE'].max() * 1.5)) + .2
+# calculate p-value for difference in TLE scores between samples labeled 'TLE' vs 'Ctrl' in TLE_v_Ctrl_scores
+tle_group = TLE_v_Ctrl_scores[TLE_v_Ctrl_scores['TLE_v_Ctrl'] == 'TLE']['TLE']
+ctrl_group = TLE_v_Ctrl_scores[TLE_v_Ctrl_scores['TLE_v_Ctrl'] == 'Ctrl']['TLE']
+stat, p_value = mannwhitneyu(tle_group, ctrl_group, alternative='greater')
+print(f"Mann-Whitney U test p-value for TLE vs Ctrl: {p_value:.4e}")
+# Mann-Whitney U test p-value for TLE vs Ctrl: 3.0303e-02
+
+## FCD2B_v_FCD2A
+fcd2_label_nohot = reference_label_nohot.map({ a: a for a in [ 'Control-NCx', 'leukocyte', 'FCD2A', 'FCD2B' ] }).fillna('other')
+fcd2_cpgs = deconvolution_playground(reference, fcd2_label_nohot, method='effect_size', n_jobs=6)
+tiny_markers = [ 'Control-NCx', 'leukocyte' ]
+tiny_markers = { label: fcd2_cpgs[label][[ t for t in tiny_markers if t != label ]] for label in tiny_markers }
+ctx_unweight, ctx_weighted = run_predictions(within_zero_series, tiny_markers, reference, fcd2_label_nohot, pools=8)
+fcd2a_scores = -pd.DataFrame({ k: v[0]['score_ranking'] for k,v in ctx_weighted.items() }).T['Control-NCx']
+FCD2A_v_FCD2B_scores = pd.concat([ fcd2a_scores, labels['TLE_v_Ctrl'].loc[fcd2a_scores.index] ], axis=1)
+# drop samples from FCD2A_v_FCD2B_scores that don't have label 'FCD2A' or 'FCD2B'
+FCD2A_v_FCD2B_scores = FCD2A_v_FCD2B_scores[FCD2A_v_FCD2B_scores['TLE_v_Ctrl'].isin(['FCD2A', 'FCD2B'])]
+# normalize
+FCD2A_v_FCD2B_scores['Control-NCx'] = FCD2A_v_FCD2B_scores['Control-NCx'] - FCD2A_v_FCD2B_scores['Control-NCx'].min()
+FCD2A_v_FCD2B_scores['Control-NCx'] = FCD2A_v_FCD2B_scores['Control-NCx'] / FCD2A_v_FCD2B_scores['Control-NCx'].max()
+FCD2A_v_FCD2B_scores['Control-NCx'] = FCD2A_v_FCD2B_scores['Control-NCx'] + 0.82
+FCD2A_v_FCD2B_scores['Control-NCx'] = FCD2A_v_FCD2B_scores['Control-NCx'] / 2.2
+# calculate p-value for difference in Control-NCx scores between samples labeled 'FCD2A' vs 'FCD2B' in FCD2A_v_FCD2B_scores
+fcd2a_group = FCD2A_v_FCD2B_scores[FCD2A_v_FCD2B_scores['TLE_v_Ctrl'] == 'FCD2A']['Control-NCx']
+fcd2b_group = FCD2A_v_FCD2B_scores[FCD2A_v_FCD2B_scores['TLE_v_Ctrl'] == 'FCD2B']['Control-NCx']
+stat, p_value = mannwhitneyu(fcd2a_group, fcd2b_group, alternative='greater')
+print(f"Mann-Whitney U test p-value for FCD2A vs FCD2B: {p_value:.4e}")
+# Mann-Whitney U test p-value for FCD2A vs FCD2B: 2.5000e-01
+# Calculate z-score for FCD2A sample with respect to FCD2B group
+fcd2b_mean = fcd2b_group.mean()
+fcd2b_std = fcd2b_group.std()
+fcd2a_z_score = (fcd2a_group.iloc[0] - fcd2b_mean) / fcd2b_std
+print(f"Z-score for FCD2A sample with respect to FCD2B group: {fcd2a_z_score:.4f}")
+#Z-score for FCD2A sample with respect to FCD2B group: 3.6121
+
+## AD_v_EP_v_Ctrl
+ad_label_nohot = reference_label_nohot.map({ a: a for a in [ 'AD-NCx', 'Control-NCx', 'EP' ] }).fillna('non-AD')
+ad_cpgs = deconvolution_playground(reference, ad_label_nohot, method='effect_size', n_jobs=6)
+tiny_markers = [ 'AD-NCx', 'Control-NCx' ]
+tiny_markers = { label: ad_cpgs[label][[ t for t in tiny_markers if t != label ]] for label in tiny_markers }
+ad_unweight, ad_weighted = run_predictions(within_zero_series, tiny_markers, reference, ad_label_nohot)
+ad_scores = -pd.DataFrame({ k: v[0]['score_ranking'] for k,v in ad_weighted.items() }).T['AD-NCx']
+AD_v_EP_v_Ctrl_scores = pd.concat([ ad_scores, labels['AD_v_EP_v_Ctrl'].loc[ad_scores.index] ], axis=1)
+# normalize
+AD_v_EP_v_Ctrl_scores['AD-NCx'] = AD_v_EP_v_Ctrl_scores['AD-NCx'] - AD_v_EP_v_Ctrl_scores['AD-NCx'].min()
+AD_v_EP_v_Ctrl_scores['AD-NCx'] = AD_v_EP_v_Ctrl_scores['AD-NCx'] / AD_v_EP_v_Ctrl_scores['AD-NCx'].max()
+AD_v_EP_v_Ctrl_scores['AD-NCx'] = AD_v_EP_v_Ctrl_scores['AD-NCx'] + .63
+AD_v_EP_v_Ctrl_scores['AD-NCx'] = AD_v_EP_v_Ctrl_scores['AD-NCx'] / 1.8
+# calculate p-value for difference in AD-NCx scores between samples labeled 'AD' vs 'EP' vs 'Ctrl' in AD_v_EP_v_Ctrl_scores
+ad_group = AD_v_EP_v_Ctrl_scores[AD_v_EP_v_Ctrl_scores['AD_v_EP_v_Ctrl'] == 'AD check']['AD-NCx']
+ep_group = AD_v_EP_v_Ctrl_scores[AD_v_EP_v_Ctrl_scores['AD_v_EP_v_Ctrl'] == 'EP']['AD-NCx']
+ctrl_group = AD_v_EP_v_Ctrl_scores[AD_v_EP_v_Ctrl_scores['AD_v_EP_v_Ctrl'] == 'Ctrl']['AD-NCx']
+stat, p_value = mannwhitneyu(ad_group, ctrl_group, alternative='greater')
+print(f"Mann-Whitney U test p-value for AD vs Ctrl: {p_value:.4e}")
+stat, p_value = mannwhitneyu(ad_group, ep_group, alternative='greater')
+print(f"Mann-Whitney U test p-value for AD vs EP: {p_value:.4e}")
+stat, p_value = mannwhitneyu(ep_group, ctrl_group, alternative='greater')
+print(f"Mann-Whitney U test p-value for EP vs Ctrl: {p_value:.4e}")
+# Mann-Whitney U test p-value for AD vs Ctrl: 9.1667e-02
+# Mann-Whitney U test p-value for AD vs EP: 4.5238e-01
+# Mann-Whitney U test p-value for EP vs Ctrl: 1.7483e-02
+
+# plotting
+EP_v_Ctrl_scores['PLOT'] = 'EPI_v_CTRL'
+EP_v_Ctrl_scores.columns = [ 'SCORE', 'CLASS', 'PLOT' ]
+FCD_v_Ctrl_scores['PLOT'] = 'FCD_v_CTRL'
+FCD_v_Ctrl_scores.columns = [ 'SCORE', 'CLASS', 'PLOT' ]
+TLE_v_Ctrl_scores['PLOT'] = 'TLE_v_CTRL'
+TLE_v_Ctrl_scores.columns = [ 'SCORE', 'CLASS', 'PLOT' ]
+FCD2A_v_FCD2B_scores['PLOT'] = 'FCD2A_v_FCD2B'
+FCD2A_v_FCD2B_scores.columns = [ 'SCORE', 'CLASS', 'PLOT' ]
+AD_v_EP_v_Ctrl_scores['PLOT'] = 'AD_v_CTRL'
+AD_v_EP_v_Ctrl_scores.columns = [ 'SCORE', 'CLASS', 'PLOT' ]
+plottable = pd.concat([EP_v_Ctrl_scores, FCD_v_Ctrl_scores, TLE_v_Ctrl_scores, FCD2A_v_FCD2B_scores, AD_v_EP_v_Ctrl_scores], axis=0)
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+# Set up seaborn and matplotlib
+sns.set(style="whitegrid")
+fig, axs = plt.subplots(1, 5, figsize=(18.35, 5))
+
+# Group the dataframe by 'PLOT'
+grouped = plottable.groupby('PLOT')
+
+# Default seaborn color palette
+default_palette = sns.color_palette()
+
+# Iterate over each group and plot
+for ax, (plot, group) in zip(axs, grouped):
+    # Get unique classes and order them with 'Ctrl' first
+    unique_classes = group['CLASS'].dropna().unique().tolist()
+    if 'Ctrl' in unique_classes:
+        unique_classes.remove('Ctrl')
+        unique_classes = ['Ctrl'] + unique_classes
+    # Create a color palette for this specific plot's classes
+    plot_palette = {cls: default_palette[i] for i, cls in enumerate(unique_classes)}
+    sns.boxplot(x='CLASS', y='SCORE', data=group, ax=ax, showfliers=False, boxprops=dict(facecolor='none'), whis=0, order=unique_classes, linewidth=1.5)
+    sns.stripplot(x='CLASS', y='SCORE', data=group, ax=ax, jitter=True, order=unique_classes, hue='CLASS', palette=plot_palette, legend=False)
+    ax.set_title(f'Plot {plot}')
+    ax.set_xlabel('Class')
+    ax.set_ylabel('Scores')
+
+# Adjust layout
+plt.tight_layout()
+
+# Save plots to a PDF
+plt.savefig('jitter_plots_2.pdf')
+plt.show()
+plt.close()
